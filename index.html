@@ -362,6 +362,15 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .coach-chips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
 .coach-chips .chip { font-size: 12px; padding: 7px 12px; }
 
+/* ---------- custom workout builder ---------- */
+.cwx { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--rs); padding: 10px 12px; margin-bottom: 8px; }
+.cwx-controls { display: grid; grid-template-columns: 1fr 1.25fr 0.75fr; gap: 6px; margin-top: 9px; }
+.cwx-ctl { display: flex; align-items: center; justify-content: center; gap: 5px; background: rgba(20,22,34,0.045); border-radius: 10px; padding: 6px 2px; min-width: 0; }
+.cwx-ctl .lb { font-size: 9.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.4px; }
+.cwx-ctl b { font-size: 13px; min-width: 26px; text-align: center; white-space: nowrap; }
+.cwx-ctl button { font-size: 16px; font-weight: 800; color: var(--ink2); padding: 0 5px; }
+.cwx-rest b { color: var(--violet); }
+
 </style>
 </head>
 <body>
@@ -2305,6 +2314,20 @@ function nextLiftInfo(prof) {
   }
   return null;
 }
+/* what actually runs on a lift weekday: custom override or the generated plan day */
+function workoutForWeekday(prof, wd) {
+  const cwId = prof.customMap && prof.customMap[wd];
+  if (cwId) {
+    const cw = (prof.customWorkouts || []).find(c => c.id === cwId);
+    if (cw) return { type: 'custom', id: cw.id, name: cw.name, exercises: cw.exercises };
+  }
+  if (!prof.plan) return null;
+  const map = prof.plan.dayMap || {};
+  const idx = map[wd] != null ? map[wd] : 0;
+  const day = prof.plan.days[idx];
+  return day ? { type: 'plan', idx, name: day.name, exercises: day.exercises } : null;
+}
+
 function sportLabelFor(prof, act) {
   if (act === 'sport') return (prof.quiz.sportLabel || '').trim() || 'Match / training';
   return ACTIVITIES[act] ? ACTIVITIES[act].verb : act;
@@ -2324,6 +2347,8 @@ function migrateProfile(p) {
   if (!p.quiz.weekSchedule) p.quiz.weekSchedule = scheduleFromDays(p.quiz.daysPerWeek || 3);
   if (!p.sportLogs) p.sportLogs = [];
   if (!p.quiz.videoPref) p.quiz.videoPref = 'auto';
+  if (!p.customWorkouts) p.customWorkouts = [];
+  if (!p.customMap) p.customMap = {};
   if (p.plan && !p.plan.dayMap) p.plan.dayMap = assignDayMap(p.plan, p.quiz.weekSchedule);
   return p;
 }
@@ -2445,7 +2470,7 @@ function coachTips(profile) {
 
 if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
   ATHLETE_TYPES, ACTIVITIES, WEEKDAYS, WEEKDAYS_FULL, defaultSchedule, scheduleFromDays, liftDaysOf,
-  dayLegScore, assignDayMap, migrateProfile, recentWins, coachTips, nextLiftInfo,
+  dayLegScore, assignDayMap, migrateProfile, recentWins, coachTips, nextLiftInfo, workoutForWeekday,
 });
 
 
@@ -2590,7 +2615,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -2638,7 +2663,8 @@ function createProfile(quiz) {
       sessionMinutes: quiz.sessionMinutes, equipment: quiz.equipment, focus: quiz.focus || [],
       videoPref: quiz.videoPref || 'auto',
     },
-    planCount: 0, plan: null, logs: [], sportLogs: [], exState: {}, prs: {}, flags: {}, activeWorkout: null,
+    planCount: 0, plan: null, logs: [], sportLogs: [], exState: {}, prs: {}, flags: {},
+    customWorkouts: [], customMap: {}, activeWorkout: null,
   };
   prof.plan = generatePlan(prof);
   App.data.profiles[id] = prof;
@@ -2680,6 +2706,23 @@ function startWorkout(prof, dayIdx) {
   saveApp();
 }
 
+function startCustomWorkout(prof, cwId) {
+  const cw = (prof.customWorkouts || []).find(c => c.id === cwId);
+  if (!cw) return;
+  const entries = cw.exercises.map(pe => {
+    const t = nextTargets(prof, pe);
+    const sets = [];
+    for (let i = 0; i < pe.sets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
+    return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew };
+  });
+  App.workout = {
+    id: U.uid(), date: U.todayISO(), startTs: Date.now(), dayIdx: null, customId: cwId,
+    dayName: cw.name, entries, curIdx: 0,
+  };
+  prof.activeWorkout = App.workout;
+  saveApp();
+}
+
 function discardWorkout(prof) {
   App.workout = null; prof.activeWorkout = null; saveApp();
 }
@@ -2695,7 +2738,7 @@ function finishWorkout(prof) {
   const prs = detectPRs(prof, log);
   const msgs = applyProgression(prof, log);
   prof.logs.push(log);
-  prof.plan.nextDayIdx = ((w.dayIdx + 1) % prof.plan.days.length);
+  if (w.dayIdx != null && prof.plan) prof.plan.nextDayIdx = ((w.dayIdx + 1) % prof.plan.days.length);
   prof.activeWorkout = null;
   App.workout = null;
   saveApp();
@@ -3029,7 +3072,8 @@ function renderToday(prof) {
 
   let hero = '';
   if (act === 'lift' && nl && nl.inDays === 0 && !liftedToday) {
-    const day = prof.plan.days[nl.planIdx];
+    const w4d = workoutForWeekday(prof, wd) || { type: 'plan', idx: nl.planIdx, name: prof.plan.days[nl.planIdx].name, exercises: prof.plan.days[nl.planIdx].exercises };
+    const day = { name: w4d.name, exercises: w4d.exercises };
     const dayList = day.exercises.slice(0, 6).map(pe => {
       const ex = EX_BY_ID[pe.exId];
       const t = nextTargets(prof, pe);
@@ -3039,12 +3083,14 @@ function renderToday(prof) {
       </div>`;
     }).join('');
     hero = `<div class="card hero">
-      <div class="kicker">Today · lift day</div>
+      <div class="kicker">Today · lift day${w4d.type === 'custom' ? ' · your build 🛠️' : ''}</div>
       <h2 style="font-size:24px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">${U.esc(day.name)}</h2>
-      <div style="font-size:13px;opacity:.92;position:relative;z-index:1">${day.exercises.length} exercises · ~${estMinutes(day)} min · ${GOALS[prof.plan.goal].label}</div>
+      <div style="font-size:13px;opacity:.92;position:relative;z-index:1">${day.exercises.length} exercises · ~${estMinutes(day)} min · ${w4d.type === 'custom' ? 'Custom workout' : GOALS[prof.plan.goal].label}</div>
       <div class="mt12" style="position:relative;z-index:1">${dayList}</div>
       <div class="row mt16" style="position:relative;z-index:1">
-        <button class="btn onhero" style="flex:1" data-a="start-workout" data-idx="${nl.planIdx}">Start workout 💥</button>
+        ${w4d.type === 'custom'
+          ? `<button class="btn onhero" style="flex:1" data-a="start-custom" data-id="${w4d.id}">Start workout 💥</button>`
+          : `<button class="btn onhero" style="flex:1" data-a="start-workout" data-idx="${w4d.idx}">Start workout 💥</button>`}
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="choose-day">Switch</button>
       </div>
     </div>`;
@@ -3062,7 +3108,7 @@ function renderToday(prof) {
       <div class="kicker">Today · rest day</div>
       <h2 style="font-size:23px;font-weight:900;margin:5px 0 2px">Recovery day 😌</h2>
       <div class="hero-rest-tx">Rest is where muscles are actually built. Eat well, sleep well — you've earned it.</div>
-      ${nl ? `<div class="next-lift">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc(prof.plan.days[nl.planIdx].name)}</div>` : ''}
+      ${nl ? `<div class="next-lift">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc((workoutForWeekday(prof, nl.wd) || {}).name || '')}</div>` : ''}
       <div class="row mt12"><button class="btn sm ghost" data-a="choose-day">Feeling fresh? Lift anyway</button></div>
     </div>`;
   } else {
@@ -3072,7 +3118,7 @@ function renderToday(prof) {
       <div class="kicker" style="color:rgba(255,255,255,0.85)">Today · ${U.esc(ACTIVITIES[act].label.toLowerCase())} day</div>
       <h2 style="font-size:23px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">${ACTIVITIES[act].emoji} ${U.esc(label)}</h2>
       <div style="font-size:13.5px;opacity:.95;position:relative;z-index:1;line-height:1.5">${done ? 'Banked! Great work — recovery is now the workout.' : 'The plan keeps your legs fresh for this — go enjoy it.'}</div>
-      ${nl ? `<div class="next-lift" style="position:relative;z-index:1;color:rgba(255,255,255,0.9)">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc(prof.plan.days[nl.planIdx].name)}</div>` : ''}
+      ${nl ? `<div class="next-lift" style="position:relative;z-index:1;color:rgba(255,255,255,0.9)">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc((workoutForWeekday(prof, nl.wd) || {}).name || '')}</div>` : ''}
       <div class="row mt16" style="position:relative;z-index:1">
         <button class="btn onhero" style="flex:1;color:#6B3FD9" data-a="sport-done" data-act="${act}">${done ? '✓ Done — tap to undo' : 'Mark it done ✓'}</button>
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="choose-day">Lift instead</button>
@@ -3465,12 +3511,21 @@ function showAddExSheet(prof) {
   });
 }
 function showChooseDaySheet(prof) {
+  const customs = customList(prof);
   showSheet(`<h3 style="font-size:19px;font-weight:900">Pick a workout</h3><div class="mt12">
     ${prof.plan.days.map((d, i) => `
       <button class="ex-row" data-a="start-workout" data-idx="${i}">
         <span class="day-num" style="width:38px;height:38px">${i + 1}</span>
         <span><span class="nm">${U.esc(d.name)}</span><div class="mu">${d.exercises.length} exercises · ~${estMinutes(d)} min</div></span>
-      </button>`).join('')}</div>`);
+      </button>`).join('')}
+    ${customs.length ? `<div class="kicker" style="margin:10px 0 8px">Your workouts</div>` : ''}
+    ${customs.map(c => `
+      <button class="ex-row" data-a="start-custom" data-id="${c.id}">
+        <span class="thumb">🛠️</span>
+        <span><span class="nm">${U.esc(c.name)}</span><div class="mu">${c.exercises.length} exercises · ~${estMinutes(c)} min · custom</div></span>
+      </button>`).join('')}
+    </div>
+    <button class="btn ghost block mt8" data-a="cw-new">+ Build a new workout</button>`);
 }
 
 /* ============ SUMMARY ============ */
@@ -3512,10 +3567,14 @@ function renderPlanView(prof) {
       <div class="mt8">
       ${WEEKDAYS.map((wd, d) => {
         const act = sched[d] || 'rest';
-        const nm = act === 'lift' && plan.dayMap && plan.dayMap[d] != null ? plan.days[plan.dayMap[d]].name : sportLabelFor(prof, act);
-        return `<div class="plan-ex"><span style="width:38px;color:var(--ink3);font-weight:800;font-size:12.5px">${wd}</span>
-          <span>${ACTIVITIES[act].emoji}</span> ${U.esc(act === 'rest' ? 'Rest & recover' : nm)}
-          ${act === 'lift' ? '<span class="sr">lift</span>' : ''}</div>`;
+        const w4d = act === 'lift' ? workoutForWeekday(prof, d) : null;
+        const nm = w4d ? w4d.name : sportLabelFor(prof, act);
+        const inner = `<span style="width:38px;color:var(--ink3);font-weight:800;font-size:12.5px">${wd}</span>
+          <span>${act === 'lift' && w4d && w4d.type === 'custom' ? '🛠️' : ACTIVITIES[act].emoji}</span> ${U.esc(act === 'rest' ? 'Rest & recover' : nm)}
+          ${act === 'lift' ? `<span class="sr">${w4d && w4d.type === 'custom' ? 'custom · tap' : 'tap to swap'}</span>` : ''}`;
+        return act === 'lift'
+          ? `<button class="plan-ex" style="width:100%;text-align:left" data-a="day-override-open" data-d="${d}">${inner}</button>`
+          : `<div class="plan-ex">${inner}</div>`;
       }).join('')}
       </div>
     </div>` : '';
@@ -3543,6 +3602,22 @@ function renderPlanView(prof) {
         }).join('')}
         </div>
       </div>`).join('')}
+    <div class="card">
+      <div class="row"><h3>Your workouts</h3><span class="spacer"></span><button class="btn sm dark" data-a="cw-new">+ Build</button></div>
+      ${customList(prof).length ? `<div class="mt8">
+        ${customList(prof).map(c => {
+          const days = Object.entries(prof.customMap || {}).filter(([, id]) => id === c.id).map(([d]) => WEEKDAYS[+d]);
+          return `<div class="prof-row">
+            <span class="em" style="border-radius:14px;font-size:19px">🛠️</span>
+            <span style="flex:1;min-width:0"><div class="nm">${U.esc(c.name)}</div>
+            <div class="meta">${c.exercises.length} exercises · ~${estMinutes(c)} min${days.length ? ' · ' + days.join(', ') : ''}</div></span>
+            <button class="btn sm ghost" data-a="cw-assign-open" data-id="${c.id}">Days</button>
+            <button class="btn sm ghost" data-a="cw-edit" data-id="${c.id}">Edit</button>
+            <button class="btn sm dark" data-a="start-custom" data-id="${c.id}">Start</button>
+          </div>`;
+        }).join('')}</div>` :
+      `<p class="muted mt8" style="line-height:1.5">Fancy full control? Build a workout from scratch — pick the exercises, sets and reps — then drop it onto any day of your week. Progression still tracks everything.</p>`}
+    </div>
     <div class="card">
       <h3>Fresh block</h3>
       <p class="muted mt8" style="line-height:1.5">Regenerating rebuilds the week with new exercise choices. Your weights and records carry over.</p>
@@ -3737,6 +3812,8 @@ function dispatch(e) {
   if (a === 'vid-pick') { App._vidChoice = { exId: el.dataset.ex, i: +el.dataset.i }; showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'choose-day') { showChooseDaySheet(prof); return; }
   if (a === 'start-workout') { closeSheet(); Sound.unlock(); startWorkout(prof, +el.dataset.idx); render(); return; }
+  // custom workout actions
+  if (a.startsWith('cw-') || a === 'start-custom' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
   if (['wo-exit', 'wo-finish', 'wo-step', 'wo-done', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
@@ -3744,10 +3821,16 @@ function dispatch(e) {
     const ei = +el.dataset.ei;
     const newEx = EX_BY_ID[el.dataset.ex];
     const entry = App.workout.entries[ei];
-    // update plan for the future too
-    const day = prof.plan.days[App.workout.dayIdx];
-    const pe = day.exercises.find(x => x.exId === entry.exId);
-    if (pe) pe.exId = newEx.id;
+    // update the source template for the future too (plan day or custom workout)
+    if (App.workout.customId) {
+      const cw = customById(prof, App.workout.customId);
+      const cpe = cw && cw.exercises.find(x => x.exId === entry.exId);
+      if (cpe) cpe.exId = newEx.id;
+    } else if (App.workout.dayIdx != null) {
+      const day = prof.plan.days[App.workout.dayIdx];
+      const pe = day.exercises.find(x => x.exId === entry.exId);
+      if (pe) pe.exId = newEx.id;
+    }
     const newPlanEx = Object.assign({}, entry.plan, { exId: newEx.id, timed: !!newEx.timed });
     const t = nextTargets(prof, newPlanEx);
     entry.exId = newEx.id;
@@ -3854,6 +3937,211 @@ function dispatch(e) {
       if (!ok) { Store.wipe(); App.data = defaultData(); App.workout = null; App.onboarding = null; App.creating = false; render(); }
     });
     return;
+  }
+}
+
+
+/* ============ LiftOff — custom workout builder & day assignment ============ */
+'use strict';
+
+function customList(prof) { return prof.customWorkouts || (prof.customWorkouts = []); }
+function customById(prof, id) { return customList(prof).find(c => c.id === id); }
+
+/* default scheme for a newly added exercise */
+function cwDefaultEntry(prof, ex) {
+  const type = CORE_PATTERNS.includes(ex.pattern) || ex.cat === 'core' ? 'core' : ex.cat === 'compound' ? 'comp' : 'iso';
+  const sch = schemeFor(prof, ex, type === 'core' ? 'iso' : type);
+  return { exId: ex.id, sets: sch.sets, repsMin: sch.repsMin, repsMax: sch.repsMax, rest: sch.rest, timed: !!ex.timed, slotType: type === 'core' ? 'core' : type };
+}
+
+const REST_STEPS = [30, 45, 60, 90, 120, 150, 180];
+
+/* ---------- builder sheet ---------- */
+function showBuilderSheet(prof) {
+  const d = App.cwDraft;
+  const rows = d.exercises.map((pe, i) => {
+    const ex = EX_BY_ID[pe.exId];
+    return `<div class="cwx">
+      <div class="row">
+        <span class="thumb" style="width:34px;height:34px;border-radius:10px;background:var(--grad-soft);display:grid;place-items:center;font-size:15px;flex:none">${patternEmoji(ex)}</span>
+        <div style="flex:1;min-width:0"><div class="nm" style="font-weight:800;font-size:14px">${U.esc(ex.name)}</div>
+          <div class="muted" style="font-size:11.5px">${ex.m.p.map(m => MUSCLES[m].label).join(', ')}</div></div>
+        <button class="iconbtn" style="width:30px;height:30px;font-size:13px" data-a="cw-move" data-i="${i}" data-d="-1" ${i === 0 ? 'disabled style="opacity:.3;width:30px;height:30px;font-size:13px"' : ''}>↑</button>
+        <button class="iconbtn" style="width:30px;height:30px;font-size:13px" data-a="cw-move" data-i="${i}" data-d="1" ${i === d.exercises.length - 1 ? 'disabled style="opacity:.3;width:30px;height:30px;font-size:13px"' : ''}>↓</button>
+        <button class="iconbtn" style="width:30px;height:30px;font-size:13px;color:#C0302C" data-a="cw-remove" data-i="${i}">✕</button>
+      </div>
+      <div class="cwx-controls">
+        <div class="cwx-ctl"><span class="lb">Sets</span>
+          <button data-a="cw-step" data-i="${i}" data-f="sets" data-d="-1">−</button><b>${pe.sets}</b><button data-a="cw-step" data-i="${i}" data-f="sets" data-d="1">+</button></div>
+        <div class="cwx-ctl"><span class="lb">${pe.timed ? 'Secs' : 'Reps'}</span>
+          <button data-a="cw-step" data-i="${i}" data-f="repsMin" data-d="-1">−</button><b>${pe.repsMin}–${pe.repsMax}</b><button data-a="cw-step" data-i="${i}" data-f="repsMax" data-d="1">+</button></div>
+        <button class="cwx-ctl cwx-rest" data-a="cw-rest" data-i="${i}"><span class="lb">Rest</span><b>${U.fmtDur(pe.rest)}</b></button>
+      </div>
+    </div>`;
+  }).join('');
+  showSheet(`
+    <h3 style="font-size:19px;font-weight:900">${d.id ? 'Edit workout' : 'Build a workout'}</h3>
+    <p class="muted mt8" style="margin-bottom:10px">Your exercises, your order, your scheme. Progression still tracks every lift automatically.</p>
+    <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day 🍑" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
+    <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e">🧱</div>Add your first exercise below.</div>'}</div>
+    <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
+    <div class="row mt16">
+      ${d.id ? '<button class="btn danger" data-a="cw-delete">Delete</button>' : ''}
+      <button class="btn primary" style="flex:1" data-a="cw-save">${d.id ? 'Save changes' : 'Save workout 💾'}</button>
+    </div>`);
+  const nm = document.getElementById('cw-name');
+  if (nm) nm.addEventListener('input', () => { App.cwDraft.name = nm.value; });
+}
+
+/* exercise picker for the builder */
+function showCwPickSheet(prof) {
+  const inW = new Set(App.cwDraft.exercises.map(e => e.exId));
+  const opts = EXERCISES.filter(e => !inW.has(e.id) && e.equip.every(eq => prof.quiz.equipment.includes(eq)));
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Add an exercise</h3>
+    <input class="search mt12" id="cwpick-q" placeholder="Search…" autocomplete="off">
+    <div id="cwpick-list">${opts.slice(0, 14).map(e => exRowHtml(e, 'cw-pick')).join('')}</div>`);
+  const q = document.getElementById('cwpick-q');
+  q.addEventListener('input', () => {
+    const v = q.value.toLowerCase();
+    document.getElementById('cwpick-list').innerHTML =
+      opts.filter(e => e.name.toLowerCase().includes(v)).slice(0, 16).map(e => exRowHtml(e, 'cw-pick')).join('') || '<div class="empty">No matches.</div>';
+  });
+}
+
+/* weekday assignment sheet */
+function showAssignSheet(prof, cwId) {
+  const cw = customById(prof, cwId); if (!cw) return;
+  const sched = prof.quiz.weekSchedule || {};
+  const cm = prof.customMap || {};
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Drop “${U.esc(cw.name)}” onto days</h3>
+    <p class="muted mt8" style="margin-bottom:12px">Tap the days this workout should run. It replaces the auto plan on those days — tap again to remove. Picking a rest or sport day turns it into a lifting day.</p>
+    <div class="chips">
+    ${WEEKDAYS.map((wd, dIdx) => {
+      const mine = cm[dIdx] === cwId;
+      const other = cm[dIdx] && cm[dIdx] !== cwId ? customById(prof, cm[dIdx]) : null;
+      const act = sched[dIdx] || 'rest';
+      return `<button class="chip ${mine ? 'grad-on' : ''}" data-a="cw-assign-day" data-id="${cwId}" data-d="${dIdx}">
+        ${wd}${mine ? ' ✓' : other ? ' · ' + U.esc(other.name.slice(0, 8)) : act !== 'lift' ? ' · ' + ACTIVITIES[act].emoji : ''}</button>`;
+    }).join('')}
+    </div>
+    <button class="btn primary block mt16" data-a="sheet-close">Done</button>`);
+}
+
+/* day override sheet (from Plan week rows) */
+function showDayOverrideSheet(prof, wd) {
+  const cm = prof.customMap || {};
+  const plan = prof.plan;
+  const autoIdx = plan.dayMap && plan.dayMap[wd] != null ? plan.dayMap[wd] : 0;
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${WEEKDAYS_FULL[wd]}’s workout</h3>
+    <div class="mt12">
+    <button class="ex-row" data-a="day-override-set" data-d="${wd}" data-v="">
+      <span class="thumb">🎯</span><span><span class="nm">Auto — ${U.esc(plan.days[autoIdx].name)}</span>
+      <div class="mu">Recommended: placed to suit your week</div></span>${!cm[wd] ? '✓' : ''}
+    </button>
+    ${customList(prof).map(c => `
+      <button class="ex-row" data-a="day-override-set" data-d="${wd}" data-v="${c.id}">
+        <span class="thumb">🛠️</span><span><span class="nm">${U.esc(c.name)}</span>
+        <div class="mu">${c.exercises.length} exercises · custom</div></span>${cm[wd] === c.id ? '✓' : ''}
+      </button>`).join('')}
+    </div>
+    ${customList(prof).length ? '' : '<p class="muted mt8">No custom workouts yet — build one from the Plan tab.</p>'}`);
+}
+
+/* ---------- actions ---------- */
+function customAction(a, el, prof) {
+  if (a === 'cw-new') { App.cwDraft = { id: null, name: '', exercises: [] }; showBuilderSheet(prof); return; }
+  if (a === 'cw-edit') {
+    const cw = customById(prof, el.dataset.id); if (!cw) return;
+    App.cwDraft = JSON.parse(JSON.stringify({ id: cw.id, name: cw.name, exercises: cw.exercises }));
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-add-ex') { showCwPickSheet(prof); return; }
+  if (a === 'cw-pick') {
+    const ex = EX_BY_ID[el.dataset.ex];
+    App.cwDraft.exercises.push(cwDefaultEntry(prof, ex));
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-remove') { App.cwDraft.exercises.splice(+el.dataset.i, 1); showBuilderSheet(prof); return; }
+  if (a === 'cw-move') {
+    const i = +el.dataset.i, j = i + (+el.dataset.d);
+    const arr = App.cwDraft.exercises;
+    if (j < 0 || j >= arr.length) return;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-step') {
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    const f = el.dataset.f, delta = +el.dataset.d;
+    if (f === 'sets') pe.sets = U.clamp(pe.sets + delta, 1, 8);
+    if (f === 'repsMin') pe.repsMin = U.clamp(pe.repsMin + delta * (pe.timed ? 5 : 1), 1, pe.repsMax - 1);
+    if (f === 'repsMax') pe.repsMax = U.clamp(pe.repsMax + delta * (pe.timed ? 5 : 1), pe.repsMin + 1, pe.timed ? 300 : 30);
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-rest') {
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    const cur = REST_STEPS.indexOf(pe.rest);
+    pe.rest = REST_STEPS[(cur + 1 + REST_STEPS.length) % REST_STEPS.length] || 60;
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-save') {
+    const d = App.cwDraft;
+    if (!d.exercises.length) return toast('Add at least one exercise 💪');
+    const name = (d.name || '').trim() || 'My Workout';
+    if (d.id) {
+      const cw = customById(prof, d.id);
+      Object.assign(cw, { name, exercises: d.exercises });
+      saveApp(); closeSheet(); render();
+      toast(`“${name}” updated ✨`);
+    } else {
+      const cw = { id: U.uid(), name, exercises: d.exercises, createdAt: U.todayISO() };
+      customList(prof).push(cw);
+      saveApp(); closeSheet(); render();
+      toast(`“${name}” saved 🎉`);
+      setTimeout(() => showAssignSheet(prof, cw.id), 350);
+    }
+    return;
+  }
+  if (a === 'cw-delete') {
+    const d = App.cwDraft;
+    showConfirm('Delete this workout?', 'Your logged history and records are kept — only the workout template is removed.', 'Keep it', 'Delete', ok => {
+      if (!ok) {
+        prof.customWorkouts = customList(prof).filter(c => c.id !== d.id);
+        for (const [wd, id] of Object.entries(prof.customMap || {})) if (id === d.id) delete prof.customMap[wd];
+        saveApp(); closeSheet(); render();
+        toast('Workout deleted');
+      }
+    });
+    return;
+  }
+  if (a === 'cw-assign-open') { showAssignSheet(prof, el.dataset.id); return; }
+  if (a === 'cw-assign-day') {
+    const wd = +el.dataset.d, id = el.dataset.id;
+    prof.customMap = prof.customMap || {};
+    if (prof.customMap[wd] === id) delete prof.customMap[wd];
+    else {
+      prof.customMap[wd] = id;
+      if ((prof.quiz.weekSchedule[wd] || 'rest') !== 'lift') {
+        prof.quiz.weekSchedule[wd] = 'lift';
+        prof.quiz.daysPerWeek = Math.max(1, liftDaysOf(prof.quiz.weekSchedule).length);
+        if (prof.plan) prof.plan.daysPerWeek = prof.quiz.daysPerWeek;
+        toast(`${WEEKDAYS_FULL[wd]} is now a lifting day 🏋️`);
+      }
+    }
+    saveApp(); showAssignSheet(prof, id); return;
+  }
+  if (a === 'day-override-open') { showDayOverrideSheet(prof, +el.dataset.d); return; }
+  if (a === 'day-override-set') {
+    const wd = +el.dataset.d, v = el.dataset.v;
+    prof.customMap = prof.customMap || {};
+    if (v) prof.customMap[wd] = v; else delete prof.customMap[wd];
+    saveApp(); closeSheet(); render();
+    toast(v ? 'Dropped in 🛠️' : 'Back to auto 🎯');
+    return;
+  }
+  if (a === 'start-custom') {
+    closeSheet(); Sound.unlock();
+    startCustomWorkout(prof, el.dataset.id);
+    render(); return;
   }
 }
 

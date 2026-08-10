@@ -680,6 +680,39 @@ h2, h3 { text-wrap: balance; }
 .ob-input:focus, .search:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--grad-soft); }
 .paircode { font-size: 17px; letter-spacing: 0.14em; }
 
+/* ============ v3.1 — compact plan week + exercise categories + saved plans ============ */
+/* plan week: 7 compact day cells instead of tall rows */
+.plan-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.pw-day { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 3px 8px;
+  border-radius: 12px; background: var(--tint); border: 1px solid transparent; min-width: 0; text-align: center; }
+.pw-day .pw-l { font-size: 10px; font-weight: 800; letter-spacing: 0.04em; color: var(--ink3); text-transform: uppercase; }
+.pw-day .pw-g { font-size: 17px; line-height: 1; }
+.pw-day .pw-n { font-size: 9.5px; font-weight: 700; color: var(--ink2); line-height: 1.15; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pw-day.lift { background: var(--grad-soft); cursor: pointer; }
+.pw-day.lift .pw-n { color: var(--brand-ink); }
+.pw-day.lift:active { transform: scale(0.96); }
+.pw-day.today { border-color: var(--brand); }
+button.pw-day { font-family: inherit; }
+
+/* exercise category grid */
+.cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.cat-sq { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 16px 15px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow);
+  cursor: pointer; text-align: left; min-height: 96px; justify-content: space-between; }
+.cat-sq:active { transform: scale(0.98); }
+.cat-sq .ic { font-size: 26px; line-height: 1; }
+.cat-sq .lb { font-family: var(--font-d); font-weight: 800; font-size: 15px; letter-spacing: -0.01em; margin-top: auto; }
+.cat-sq .ct { font-size: 11px; font-weight: 700; color: var(--ink3); }
+.cat-sq.compound { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 14px; min-height: 0;
+  background: var(--grad); border-color: transparent; box-shadow: 0 8px 20px rgba(232, 65, 42, 0.26); }
+.cat-sq.compound .ic { font-size: 30px; }
+.cat-sq.compound .lb, .cat-sq.compound .ct { color: #fff; margin-top: 0; }
+.cat-sq.compound .ct { opacity: 0.9; margin-left: auto; }
+.cat-head { display: flex; align-items: center; gap: 12px; margin: 6px 0 12px; }
+.cat-head .ic { font-size: 30px; }
+.cat-head .nm { font-family: var(--font-display); font-weight: 800; font-size: 22px; letter-spacing: -0.01em; }
+
 </style>
 </head>
 <body>
@@ -2053,7 +2086,28 @@ function exCoarseGroups(e) {
   return [...g];
 }
 
-if (typeof module !== 'undefined') module.exports = { EXERCISES, EX_BY_ID, MUSCLES, MUSCLE_GROUPS, GROUP_LABELS, EQUIP_LABELS, exCoarseGroups };
+/* ---------- exercise categories: muscle groups (primary+secondary) + compound ---------- */
+const CAT_ICON = { compound: '🏋️', quads: '🦵', hamstrings: '🦵', glutes: '🍑', calves: '🦶',
+  chest: '🛡️', back: '🔙', shoulders: '🎽', arms: '💪', core: '🎯' };
+// one exercise can sit in many categories: every group its primary OR secondary muscles hit, plus compound
+function exCategories(e) {
+  const g = new Set();
+  for (const m of e.m.p) if (MUSCLES[m]) g.add(MUSCLES[m].group);
+  for (const m of e.m.s) if (MUSCLES[m]) g.add(MUSCLES[m].group);
+  const out = [...g];
+  if (e.cat === 'compound') out.unshift('compound');
+  return out;
+}
+const CATEGORIES = ['compound'].concat(MUSCLE_GROUPS).map(key => ({
+  key,
+  label: key === 'compound' ? 'Compound lifts' : GROUP_LABELS[key],
+  icon: CAT_ICON[key] || '🎯',
+}));
+function exercisesInCategory(key) {
+  return EXERCISES.filter(e => exCategories(e).includes(key));
+}
+
+if (typeof module !== 'undefined') module.exports = { EXERCISES, EX_BY_ID, MUSCLES, MUSCLE_GROUPS, GROUP_LABELS, EQUIP_LABELS, exCoarseGroups, exCategories, CATEGORIES, CAT_ICON, exercisesInCategory };
 
 
 /* ============ LiftOff — exercise library (part 3: gym staples added in v1.9) ============ */
@@ -3083,6 +3137,7 @@ function migrateProfile(p) {
   if (!p.sportLogs) p.sportLogs = [];
   if (!p.quiz.videoPref) p.quiz.videoPref = 'auto';
   if (!p.customWorkouts) p.customWorkouts = [];
+  if (!p.savedPlans) p.savedPlans = [];
   if (!p.customMap) p.customMap = {};
   if (!p.exPrefs) p.exPrefs = {};
   if (!p.badges) p.badges = {};
@@ -3859,7 +3914,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3930,7 +3985,7 @@ function createProfile(quiz) {
       videoPref: quiz.videoPref || 'auto',
     },
     planCount: 0, plan: null, logs: [], sportLogs: [], exState: {}, prs: {}, flags: {},
-    customWorkouts: [], customMap: {}, activeWorkout: null,
+    customWorkouts: [], customMap: {}, savedPlans: [], activeWorkout: null,
   };
   prof.plan = generatePlan(prof);
   App.data.profiles[id] = prof;
@@ -3945,6 +4000,44 @@ function regeneratePlan(prof, newQuiz) {
   prof.planCount = (prof.planCount || 0) + 1;
   prof.plan = generatePlan(prof);
   prof.flags.deloadSuggested = false;
+  saveApp();
+}
+
+/* ---- saved weekly plans (named templates the user can reload) ---- */
+function savedPlans(prof) { return prof.savedPlans || (prof.savedPlans = []); }
+function saveCurrentPlan(prof, name) {
+  if (!prof.plan) return null;
+  const entry = {
+    id: U.uid(),
+    name: (name || '').trim() || prof.plan.splitName || 'My plan',
+    createdAt: U.todayISO(),
+    splitName: prof.plan.splitName,
+    goal: prof.plan.goal,
+    daysPerWeek: prof.plan.daysPerWeek,
+    days: JSON.parse(JSON.stringify(prof.plan.days)),
+    weekSchedule: JSON.parse(JSON.stringify(prof.quiz.weekSchedule || {})),
+  };
+  savedPlans(prof).unshift(entry);
+  saveApp();
+  return entry;
+}
+function loadSavedPlan(prof, id) {
+  const sp = savedPlans(prof).find(x => x.id === id);
+  if (!sp) return false;
+  prof.plan = prof.plan || {};
+  prof.plan.days = JSON.parse(JSON.stringify(sp.days));
+  if (sp.splitName) prof.plan.splitName = sp.splitName;
+  if (sp.goal) prof.plan.goal = sp.goal;
+  prof.plan.daysPerWeek = sp.daysPerWeek || sp.days.length;
+  if (sp.weekSchedule && Object.keys(sp.weekSchedule).length) prof.quiz.weekSchedule = JSON.parse(JSON.stringify(sp.weekSchedule));
+  prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+  prof.plan.nextDayIdx = 0;
+  // logs, PRs, exState, records all untouched — this only swaps the template
+  saveApp();
+  return true;
+}
+function deleteSavedPlan(prof, id) {
+  prof.savedPlans = savedPlans(prof).filter(x => x.id !== id);
   saveApp();
 }
 
@@ -5086,21 +5179,23 @@ function renderPlanView(prof) {
   const sched = prof.quiz.weekSchedule;
   const wdFor = i => { for (const [wd, idx] of Object.entries(plan.dayMap || {})) if (+idx === i && !(prof.customMap && prof.customMap[wd])) return +wd; return null; };
   const at = ATHLETE_TYPES[prof.quiz.athleteType || 'gym'];
+  const td = todayWeekday();
   const weekCard = sched ? `<div class="card">
       <div class="row"><h3>${prof.isCoach && prof.coachOf ? U.esc(prof.coachOf.athleteName) + '’s week' : 'Your week'}</h3><span class="spacer"></span><span class="tag">${at.emoji} ${at.label}</span></div>
-      <div class="mt8">
+      <div class="plan-week mt12">
       ${WEEKDAYS.map((wd, d) => {
         const act = sched[d] || 'rest';
         const w4d = act === 'lift' ? workoutForWeekday(prof, d) : null;
-        const nm = w4d ? w4d.name : sportLabelFor(prof, act);
-        const inner = `<span style="width:38px;color:var(--ink3);font-weight:800;font-size:12.5px">${wd}</span>
-          <span>${act === 'lift' && w4d && w4d.type === 'custom' ? '🛠️' : ACTIVITIES[act].emoji}</span> ${U.esc(act === 'rest' ? 'Rest & recover' : nm)}
-          ${act === 'lift' ? `<span class="sr">${w4d && w4d.type === 'custom' ? 'custom · tap' : 'tap to swap'}</span>` : ''}`;
-        return act === 'lift'
-          ? `<button class="plan-ex" style="width:100%;text-align:left" data-a="day-override-open" data-d="${d}">${inner}</button>`
-          : `<div class="plan-ex">${inner}</div>`;
+        const isLift = act === 'lift';
+        const glyph = isLift ? (w4d && w4d.type === 'custom' ? '🛠️' : '🏋️') : ACTIVITIES[act].emoji;
+        const sub = isLift ? (w4d ? w4d.name : 'Lift') : (act === 'rest' ? 'Rest' : sportLabelFor(prof, act));
+        const cls = `pw-day${isLift ? ' lift' : ''}${d === td ? ' today' : ''}`;
+        return isLift
+          ? `<button class="${cls}" data-a="day-override-open" data-d="${d}"><span class="pw-l">${wd}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span></button>`
+          : `<div class="${cls}"><span class="pw-l">${wd}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span></div>`;
       }).join('')}
       </div>
+      <div class="muted mt8" style="font-size:11.5px">Tap a lift day to swap in a custom workout.</div>
     </div>` : '';
   const coachOf = prof.isCoach && prof.coachOf;
   return `<div class="screen">
@@ -5146,9 +5241,21 @@ function renderPlanView(prof) {
         }).join('')}</div>` :
       `<p class="muted mt8" style="line-height:1.5">Fancy full control? Build a workout from scratch — pick the exercises, sets and reps — then drop it onto any day of your week. Progression still tracks everything.</p>`}
     </div>
+    ${prof.isCoach ? '' : `<div class="card">
+      <div class="row"><h3>Saved plans</h3><span class="spacer"></span><button class="btn sm dark" data-a="plan-save">Save this week</button></div>
+      ${savedPlans(prof).length ? `<div class="mt8">
+        ${savedPlans(prof).map(sp => `<div class="prof-row">
+          <span class="em" style="border-radius:14px;font-size:19px">🗂️</span>
+          <span style="flex:1;min-width:0"><div class="nm">${U.esc(sp.name)}</div>
+          <div class="meta">${sp.days.length} ${U.plural(sp.days.length, 'day')} · saved ${U.fmtDateShort(sp.createdAt)}</div></span>
+          <button class="btn sm ghost" data-a="plan-load" data-id="${sp.id}">Load</button>
+          <button class="btn sm ghost" style="color:#C0302C" data-a="plan-del" data-id="${sp.id}">✕</button>
+        </div>`).join('')}</div>`
+        : `<p class="muted mt8" style="line-height:1.5">Save the current week as a named template — then reload it any time. Your logs, records and weights always stay put.</p>`}
+    </div>`}
     <div class="card">
       <h3>Fresh block</h3>
-      <p class="muted mt8" style="line-height:1.5">Regenerating rebuilds the week with new exercise choices — including any days you’ve edited. Your weights, records and saved custom workouts always carry over.</p>
+      <p class="muted mt8" style="line-height:1.5">Regenerating rebuilds the week with new exercise choices — including any days you’ve edited. Your weights, records and saved workouts always carry over.</p>
       <button class="btn ghost block mt12" data-a="plan-regen">Regenerate plan</button>
     </div>
   </div>`;
@@ -5186,23 +5293,41 @@ function renderPrefsSheet(prof) {
 }
 
 /* ============ LIBRARY ============ */
+// body swaps between category grid, a chosen category, and live search — the
+// input handler in 08-main re-renders just this so typing keeps focus.
+function libBodyHtml(prof) {
+  const f = App.libFilter;
+  const mineOK = e => f.equip !== 'mine' || e.equip.every(eq => prof.quiz.equipment.includes(eq));
+
+  if (f.q && f.q.trim()) { // SEARCH — flat ranked list across everything
+    const list = exSearchFilter(EXERCISES.filter(mineOK), f.q);
+    return `<div id="lib-list">${list.map(e => exRowHtml(e, 'ex-open')).join('') || '<div class="empty"><div class="e">🤷</div>No matches — try fewer letters.</div>'}</div>`;
+  }
+  if (f.cat) { // CATEGORY — one category's exercises
+    const meta = CATEGORIES.find(c => c.key === f.cat) || { label: f.cat, icon: '🎯' };
+    const list = exercisesInCategory(f.cat).filter(mineOK).sort((a, b) => a.lvl - b.lvl || a.name.localeCompare(b.name));
+    return `<button class="switchback" data-a="lib-cat" data-v="">↩ All categories</button>
+      <div class="cat-head"><span class="ic">${meta.icon}</span><div><div class="nm">${U.esc(meta.label)}</div>
+        <div class="muted" style="font-size:12px">${list.length} ${U.plural(list.length, 'move')}${f.cat === 'compound' ? ' · big multi-joint lifts' : ' · anything that works the ' + U.esc(meta.label.toLowerCase())}</div></div></div>
+      <div id="lib-list">${list.map(e => exRowHtml(e, 'ex-open')).join('') || '<div class="empty"><div class="e">🤷</div>Nothing here with your kit — turn off “My kit only”.</div>'}</div>`;
+  }
+  // GRID — category squares (default)
+  return `<div class="cat-grid">
+    ${CATEGORIES.map(c => {
+      const n = exercisesInCategory(c.key).filter(mineOK).length;
+      return `<button class="cat-sq ${c.key === 'compound' ? 'compound' : ''}" data-a="lib-cat" data-v="${c.key}">
+        <span class="ic">${c.icon}</span><span class="lb">${U.esc(c.label)}</span><span class="ct">${n} ${U.plural(n, 'move')}</span>
+      </button>`;
+    }).join('')}
+  </div>`;
+}
 function renderLibrary(prof) {
   const f = App.libFilter;
-  const list = EXERCISES.filter(e => {
-    if (f.q && !exSearchFilter([e], f.q).length) return false;
-    if (f.group && !exCoarseGroups(e).includes(f.group) && !e.m.s.some(m => MUSCLES[m].group === f.group)) return false;
-    if (f.equip === 'mine' && !e.equip.every(eq => prof.quiz.equipment.includes(eq))) return false;
-    return true;
-  });
   return `<div class="screen">
-    <div class="hdr"><div><div class="hi">Exercises</div><div class="sub">${EXERCISES.length} moves, every one demonstrated</div></div></div>
-    <input class="search" id="lib-q" placeholder="🔍 Search exercises…" value="${U.esc(f.q)}" autocomplete="off">
-    <div class="filters">
-      <button class="chip ${f.equip === 'mine' ? 'on' : ''}" data-a="lib-equip">My kit only</button>
-      <button class="chip ${!f.group ? 'on' : ''}" data-a="lib-group" data-v="">All</button>
-      ${MUSCLE_GROUPS.map(g => `<button class="chip ${f.group === g ? 'on' : ''}" data-a="lib-group" data-v="${g}">${GROUP_LABELS[g]}</button>`).join('')}
-    </div>
-    <div id="lib-list">${list.map(e => exRowHtml(e, 'ex-open')).join('') || '<div class="empty"><div class="e">🤷</div>No exercises match — try clearing filters.</div>'}</div>
+    <div class="hdr"><div><div class="hi">Exercises</div><div class="sub">${EXERCISES.length} moves · pick a category or search</div></div></div>
+    <input class="search" id="lib-q" placeholder="🔍 Search all exercises…" value="${U.esc(f.q || '')}" autocomplete="off">
+    <div class="filters"><button class="chip ${f.equip === 'mine' ? 'on' : ''}" data-a="lib-equip">My kit only</button></div>
+    <div id="lib-body">${libBodyHtml(prof)}</div>
   </div>`;
 }
 
@@ -5435,6 +5560,35 @@ function dispatch(e) {
     });
     return;
   }
+  if (a === 'plan-save') {
+    showSheet(`<h3 style="font-size:19px;font-weight:900">Save this week</h3>
+      <p class="muted mt8" style="margin-bottom:10px">Give the current plan a name — reload it any time. Your logs, records and weights stay put.</p>
+      <input class="ob-input" id="plan-name" placeholder="e.g. Glute-focus block 🍑" maxlength="30" autocomplete="off" value="${U.esc((prof.plan && prof.plan.splitName) || '')}">
+      <button class="btn primary block mt16" data-a="plan-save-go">Save plan 💾</button>`);
+    setTimeout(() => { const i = document.getElementById('plan-name'); if (i) { i.focus(); i.select(); } }, 60);
+    return;
+  }
+  if (a === 'plan-save-go') {
+    const name = (document.getElementById('plan-name') || {}).value || '';
+    const e = saveCurrentPlan(prof, name);
+    closeSheet(); render();
+    toast(e ? `“${e.name}” saved 🗂️` : 'Nothing to save yet');
+    return;
+  }
+  if (a === 'plan-load') {
+    const sp = savedPlans(prof).find(x => x.id === el.dataset.id); if (!sp) return;
+    showConfirm(`Load “${sp.name}”?`, 'This replaces your current week with the saved one. Everything you’ve logged — records, weights, history — is untouched.', 'Keep current', 'Load it', ok => {
+      if (!ok) { loadSavedPlan(prof, sp.id); render(); toast(`“${sp.name}” loaded 🗂️`); }
+    });
+    return;
+  }
+  if (a === 'plan-del') {
+    const sp = savedPlans(prof).find(x => x.id === el.dataset.id); if (!sp) return;
+    showConfirm('Delete this saved plan?', `“${U.esc(sp.name)}” will be removed. It only deletes the saved template — your current week and all your data stay.`, 'Keep it', 'Delete', ok => {
+      if (!ok) { deleteSavedPlan(prof, sp.id); render(); toast('Saved plan deleted'); }
+    });
+    return;
+  }
   if (a === 'prefs-open') { showPrefsSheet(prof); return; }
   if (a === 'pref-athlete') {
     const d = App.prefsDraft;
@@ -5480,6 +5634,7 @@ function dispatch(e) {
   }
   // library
   if (a === 'lib-group') { App.libFilter.group = el.dataset.v; render(); return; }
+  if (a === 'lib-cat') { App.libFilter.cat = el.dataset.v || ''; App.libFilter.q = ''; window.scrollTo(0, 0); render(); return; }
   if (a === 'lib-equip') { App.libFilter.equip = App.libFilter.equip === 'mine' ? '' : 'mine'; render(); return; }
   // profile
   if (a === 'prof-switch') {
@@ -6606,17 +6761,8 @@ document.body.addEventListener('input', e => {
   if (e.target && e.target.id === 'lib-q') {
     App.libFilter.q = e.target.value;
     const prof = activeProfile();
-    const host = document.getElementById('lib-list');
-    if (host && prof) {
-      const f = App.libFilter;
-      const base = EXERCISES.filter(x => {
-        if (f.group && !exCoarseGroups(x).includes(f.group) && !x.m.s.some(m => MUSCLES[m].group === f.group)) return false;
-        if (f.equip === 'mine' && !x.equip.every(eq => prof.quiz.equipment.includes(eq))) return false;
-        return true;
-      });
-      const list = f.q ? exSearchFilter(base, f.q) : base;
-      host.innerHTML = list.map(x => exRowHtml(x, 'ex-open')).join('') || '<div class="empty"><div class="e">🤷</div>No matches — try clearing filters.</div>';
-    }
+    const host = document.getElementById('lib-body');
+    if (host && prof) host.innerHTML = libBodyHtml(prof); // swaps grid ⇄ search results, keeps input focus
   }
 });
 

@@ -371,6 +371,10 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .cwx-ctl button { font-size: 16px; font-weight: 800; color: var(--ink2); padding: 0 5px; }
 .cwx-rest b { color: var(--violet); }
 
+.step .v.tappable { cursor: text; }
+.step .v.tappable > span { border-bottom: 1.5px dashed rgba(20,22,34,0.22); padding-bottom: 1px; }
+.step-input { width: 100%; max-width: 74px; border: 0; background: transparent; text-align: center; font-weight: 800; font-size: 15.5px; outline: none; color: var(--ink); padding: 0; }
+
 </style>
 </head>
 <body>
@@ -1692,6 +1696,121 @@ function exCoarseGroups(e) {
 if (typeof module !== 'undefined') module.exports = { EXERCISES, EX_BY_ID, MUSCLES, MUSCLE_GROUPS, GROUP_LABELS, EQUIP_LABELS, exCoarseGroups };
 
 
+/* ============ LiftOff — exercise library (part 3: gym staples added in v1.9) ============ */
+'use strict';
+
+ex({ id: 'machine_hipthrust', name: 'Machine Hip Thrust', equip: ['machine'], pattern: 'hthrust', lvl: 1, inc: 5, anim: 'hipthrust',
+  m: { p: ['glutes'], s: ['hamstrings', 'quads'] },
+  how: {
+    setup: ['Sit back into the machine with the pad low across your hips, back on the rest.', 'Feet flat on the platform, shins vertical.'],
+    steps: ['Drive through your heels and squeeze your hips up to full lockout.', 'Chin tucked, ribs down — hold the top squeeze for a second, lower with control.'],
+    cues: ['Full lockout, hard squeeze', 'Push the floor away with your heels', 'Smooth, no bouncing'],
+    mistakes: ['Arching the lower back instead of squeezing glutes', 'Cutting the lockout short'],
+    breath: 'Exhale hard at the top of each rep.' } });
+
+ex({ id: 'hack_squat', name: 'Hack Squat', equip: ['machine'], pattern: 'squat', lvl: 2, inc: 5, anim: 'legpress',
+  m: { p: ['quads'], s: ['glutes'] },
+  how: {
+    setup: ['Back and shoulders against the pads, feet shoulder-width on the platform, slightly low.', 'Release the handles.'],
+    steps: ['Lower under control until thighs pass parallel.', 'Drive through your whole foot back up, stopping just short of locked knees.'],
+    cues: ['Depth you can control', 'Knees track over toes', 'Slow down, strong up'],
+    mistakes: ['Heels lifting off the platform', 'Bouncing out of the bottom', 'Half reps'],
+    breath: 'Inhale down, exhale up.' } });
+
+ex({ id: 'walking_lunge_db', name: 'Dumbbell Walking Lunge', equip: ['dumbbell'], pattern: 'lunge', lvl: 2, inc: 2, unilateral: true, anim: 'lunge',
+  m: { p: ['quads', 'glutes'], s: ['hamstrings', 'core'] },
+  how: {
+    setup: ['Stand tall with a dumbbell in each hand, room to walk ahead of you.'],
+    steps: ['Step forward and drop the back knee toward the floor.', 'Drive through the front foot and step straight into the next lunge.', 'Keep walking — alternate legs each step.'],
+    cues: ['Torso tall the whole walk', 'Front knee over toes', 'Controlled tap of the back knee'],
+    mistakes: ['Stumbling steps too narrow — keep a slight gap between feet', 'Leaning forward over the front leg', 'Pushing off the back foot'],
+    breath: 'Inhale as you lower, exhale as you drive forward.' } });
+
+ex({ id: 'cable_pullthrough', name: 'Cable Pull-Through', equip: ['cable'], pattern: 'hinge', lvl: 1, inc: 2.5, anim: 'rdl_db',
+  m: { p: ['glutes', 'hamstrings'], s: ['lowerback'] },
+  how: {
+    setup: ['Rope on the lowest pulley. Face away, rope between your legs, walk out until it’s taut.'],
+    steps: ['Push your hips back, letting your hands travel between your knees.', 'Snap your hips forward and squeeze your glutes tall.'],
+    cues: ['Hips do all the work — arms are just hooks', 'Flat back, soft knees', 'Full glute squeeze at the top, no lean-back'],
+    mistakes: ['Squatting instead of hinging', 'Pulling with the arms', 'Standing too close to the stack'],
+    breath: 'Inhale back, exhale as you stand.' } });
+
+ex({ id: 'goodmorning', name: 'Barbell Good Morning', equip: ['barbell'], pattern: 'hinge', lvl: 3, inc: 2.5, anim: 'rdl_bb',
+  m: { p: ['hamstrings', 'lowerback'], s: ['glutes'] },
+  how: {
+    setup: ['Bar on your upper back like a squat, feet hip-width, soft knees.'],
+    steps: ['Push your hips back and fold forward with a flat back until near parallel.', 'Drive hips forward to stand tall.'],
+    cues: ['Start light — this one rewards patience', 'Hips travel backwards, not down', 'Brace like someone’s about to poke your belly'],
+    mistakes: ['Rounding the back', 'Bending the knees into a squat', 'Going heavy too soon'],
+    breath: 'Big breath at the top, exhale as you rise.' } });
+
+ex({ id: 'seated_legcurl', name: 'Seated Leg Curl', equip: ['machine'], pattern: 'hamiso', cat: 'isolation', lvl: 1, inc: 2.5, anim: 'legcurl',
+  m: { p: ['hamstrings'], s: ['calves'] },
+  how: {
+    setup: ['Sit with the pad above your heels and the lap pad snug on your thighs.'],
+    steps: ['Curl your heels down and under as far as they’ll go.', 'Hold the squeeze, then return slowly over 2–3 seconds.'],
+    cues: ['Hips stay pinned to the seat', 'Full range both ways', 'The slow return is the growth'],
+    mistakes: ['Lifting the hips to cheat', 'Letting the stack slam back'],
+    breath: 'Exhale as you curl, inhale as you return.' } });
+
+ex({ id: 'chestsup_row', name: 'Chest-Supported Row', equip: ['machine'], pattern: 'pullH', lvl: 1, inc: 2.5, anim: 'row_cable',
+  m: { p: ['lats', 'upperback'], s: ['biceps', 'reardelts'] },
+  how: {
+    setup: ['Chest against the pad, feet planted, grab the handles with long arms.'],
+    steps: ['Row the handles to your ribs, elbows skimming your sides.', 'Squeeze your shoulder blades together, then reach fully forward.'],
+    cues: ['Chest glued to the pad — no heaving', 'Lead with the elbows', 'Full stretch at the front'],
+    mistakes: ['Lifting the chest off the pad', 'Shrugging the shoulders up', 'Short, jerky pulls'],
+    breath: 'Exhale pull, inhale reach.' } });
+
+ex({ id: 'pullover_db', name: 'Dumbbell Pullover', equip: ['dumbbell', 'bench'], pattern: 'pullV', lvl: 2, inc: 2, anim: 'skull',
+  m: { p: ['lats', 'chest'], s: ['triceps'] },
+  how: {
+    setup: ['Lie on a bench holding one dumbbell with both hands above your chest, slight elbow bend.'],
+    steps: ['Lower the weight in an arc behind your head until you feel a big stretch.', 'Pull it back over your chest along the same arc.'],
+    cues: ['Ribs down — don’t let the back arch up', 'Elbow bend stays fixed', 'Feel the stretch through lats and chest'],
+    mistakes: ['Bending the elbows into a triceps extension', 'Arching off the bench', 'Rushing the stretch'],
+    breath: 'Inhale as it lowers, exhale as you pull over.' } });
+
+ex({ id: 'assisted_pullup', name: 'Assisted Pull-Up (Machine)', equip: ['machine'], pattern: 'pullV', lvl: 1, bw: true, anim: 'pullup',
+  m: { p: ['lats'], s: ['biceps', 'upperback'] },
+  how: {
+    setup: ['Set the assistance weight — heavier stack = more help.', 'Kneel or stand on the pad, grab the bars just wider than shoulders.'],
+    steps: ['Pull your chest toward the bar, elbows driving down.', 'Lower all the way to straight arms with control.', 'Progress by nudging the assistance down over the weeks.'],
+    cues: ['Full hang to chin-over — full range builds real pull-ups', 'Lead with the chest', 'Slow, proud negatives'],
+    mistakes: ['Too much assistance forever — wean it down', 'Half reps at the bottom', 'Kipping off the knee pad'],
+    breath: 'Exhale up, inhale down.' } });
+
+ex({ id: 'assisted_dip', name: 'Assisted Dip (Machine)', equip: ['machine'], pattern: 'pushH', lvl: 1, bw: true, anim: 'dips',
+  m: { p: ['chest', 'triceps'], s: ['shoulders'] },
+  how: {
+    setup: ['Set the assistance weight — heavier stack = more help.', 'Grip the bars, knees on the pad, slight forward lean.'],
+    steps: ['Bend your elbows to lower until shoulders are level with elbows.', 'Press back up to straight arms.', 'Reduce the assistance as it gets easier.'],
+    cues: ['Lean forward for chest, upright for triceps', 'Shoulders down away from ears', 'Depth you control'],
+    mistakes: ['Dive-bombing the bottom', 'Shrugging at the top', 'Keeping the same assistance for months'],
+    breath: 'Inhale down, exhale up.' } });
+
+ex({ id: 'upright_row_db', name: 'Dumbbell Upright Row', equip: ['dumbbell'], pattern: 'deltside', cat: 'isolation', lvl: 2, inc: 1, anim: 'shrug',
+  m: { p: ['shoulders'], s: ['upperback', 'biceps'] },
+  how: {
+    setup: ['Stand tall, dumbbells resting on your thighs, palms facing you.'],
+    steps: ['Pull the dumbbells up your body to chest height, elbows leading out wide.', 'Lower slowly back to your thighs.'],
+    cues: ['Elbows always higher than wrists', 'Stop at chest height — no need to go higher', 'Keep the bells close to your body'],
+    mistakes: ['Swinging with the hips', 'Pulling to chin height with cranky shoulders — chest height is plenty', 'Wrists curling'],
+    breath: 'Exhale up, inhale down.' } });
+
+ex({ id: 'machine_latraise', name: 'Machine Lateral Raise', equip: ['machine'], pattern: 'deltside', cat: 'isolation', lvl: 1, inc: 2.5, anim: 'latraise',
+  m: { p: ['shoulders'], s: [] },
+  how: {
+    setup: ['Sit with your arms against the pads, elbows bent at the machine’s angle.'],
+    steps: ['Raise your arms out to shoulder height.', 'Pause, then lower slowly against the resistance.'],
+    cues: ['Shoulders stay down — no shrugging', 'Smooth arc both ways', 'Great for strict, swing-free reps'],
+    mistakes: ['Rocking the torso for momentum', 'Rushing the negative'],
+    breath: 'Exhale up, inhale down.' } });
+
+/* re-register the index for the new entries */
+for (const e of EXERCISES) EX_BY_ID[e.id] = e;
+
+
 /* ============ LiftOff — curated exercise demo videos (multi-coach) ============
    Each exercise holds one or more verified demos tagged by presenter and style:
      g: 'f' woman-led · 'm' man-led · 'x' unknown/mixed
@@ -1777,6 +1896,19 @@ const EX_VIDEOS = {
   mount_climber: [{ vid: 'cnyTQDSE884', by: _WG, g: 'f', s: 'gen' }],
   farmer_carry:  [{ vid: 'Fkzk_RqlYig', by: 'Buff Dudes', g: 'm', s: 'gen' }],
   superman:      [{ vid: 'ATly_pW0i6g', by: _WG, g: 'f', s: 'gen' }],
+  /* v1.9 additions */
+  machine_hipthrust: [{ vid: 'ZSPmIyX9RZs', by: _RP, g: 'm', s: 'bb' }],
+  hack_squat:        [{ vid: 'rYgNArpwE7E', by: _RP, g: 'm', s: 'bb' }],
+  walking_lunge_db:  [{ vid: 'eFWCn5iEbTU', by: _RP, g: 'm', s: 'bb' }],
+  cable_pullthrough: [{ vid: 'pv8e6OSyETE', by: _RP, g: 'm', s: 'bb' }],
+  goodmorning:       [{ vid: 'dEJ0FTm-CEk', by: _RP, g: 'm', s: 'bb' }],
+  seated_legcurl:    [{ vid: 'Orxowest56U', by: _RP, g: 'm', s: 'bb' }],
+  chestsup_row:      [{ vid: '_FrrYQxA6kc', by: _RP, g: 'm', s: 'bb' }],
+  pullover_db:       [{ vid: 'jQjWlIwG4sI', by: _RP, g: 'm', s: 'bb' }],
+  assisted_pullup:   [{ vid: '8ygapPMYK1I', by: _RP, g: 'm', s: 'bb' }],
+  assisted_dip:      [{ vid: 'yZ83t4mrPrI', by: _RP, g: 'm', s: 'bb' }],
+  upright_row_db:    [{ vid: 'Ub6QruNKfbY', by: _RP, g: 'm', s: 'bb' }],
+  machine_latraise:  [{ vid: '0o07iGKUarI', by: _RP, g: 'm', s: 'bb' }],
 };
 
 /* pick the demo matching the profile's preference; fall back to the smart default */
@@ -2615,7 +2747,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3188,12 +3320,12 @@ function renderWorkoutEx(prof, e, ei) {
           ex.timed ? `<div class="step" style="visibility:hidden"></div>` :
           `<div class="step">
             <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="w" data-d="-1">−</button>
-            <div class="v">${s.w > 0 ? U.fmtW(s.w, u) : '—'}<small>${U.unitLabel(u).toUpperCase()}</small></div>
+            <div class="v tappable" data-a="wo-typein" data-ei="${ei}" data-si="${si}" data-f="w" title="Tap to type"><span>${s.w > 0 ? U.fmtW(s.w, u) : '—'}</span><small>${U.unitLabel(u).toUpperCase()}</small></div>
             <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="w" data-d="1">+</button>
           </div>`}
         <div class="step">
           <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="reps" data-d="-1">−</button>
-          <div class="v">${s.reps}<small>${ex.timed ? 'SEC' : 'REPS'}</small></div>
+          <div class="v tappable" data-a="wo-typein" data-ei="${ei}" data-si="${si}" data-f="reps" title="Tap to type"><span>${s.reps}</span><small>${ex.timed ? 'SEC' : 'REPS'}</small></div>
           <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="reps" data-d="1">+</button>
         </div>
         <button class="donebtn ${s.done ? 'on' : ''}" data-a="wo-done" data-ei="${ei}" data-si="${si}">✓</button>
@@ -3274,8 +3406,37 @@ function workoutAction(a, el, prof) {
     else s.reps = U.clamp(s.reps + (+el.dataset.d) * (ex.timed ? 5 : 1), 0, ex.timed ? 300 : 50);
     prof.activeWorkout = w; saveApp();
     const v = el.parentElement.querySelector('.v');
-    if (el.dataset.f === 'w') v.innerHTML = `${s.w > 0 ? U.fmtW(s.w, prof.units) : '—'}<small>${U.unitLabel(prof.units).toUpperCase()}</small>`;
-    else v.innerHTML = `${s.reps}<small>${ex.timed ? 'SEC' : 'REPS'}</small>`;
+    if (el.dataset.f === 'w') v.innerHTML = `<span>${s.w > 0 ? U.fmtW(s.w, prof.units) : '—'}</span><small>${U.unitLabel(prof.units).toUpperCase()}</small>`;
+    else v.innerHTML = `<span>${s.reps}</span><small>${ex.timed ? 'SEC' : 'REPS'}</small>`;
+    return;
+  }
+  if (a === 'wo-typein') {
+    if (el.querySelector('input')) return; // already editing
+    const ei = +el.dataset.ei, si = +el.dataset.si, isW = el.dataset.f === 'w';
+    const e = w.entries[ei], s = e.sets[si];
+    const ex = EX_BY_ID[e.exId];
+    const cur = isW ? (s.w > 0 ? U.fmtW(s.w, prof.units) : '') : String(s.reps);
+    const unitTag = isW ? U.unitLabel(prof.units).toUpperCase() : (ex.timed ? 'SEC' : 'REPS');
+    el.innerHTML = `<input class="step-input" type="text" inputmode="decimal" enterkeyhint="done" value="${cur}"><small>${unitTag}</small>`;
+    const inp = el.querySelector('input');
+    inp.focus(); inp.select();
+    const restore = () => {
+      el.innerHTML = isW
+        ? `<span>${s.w > 0 ? U.fmtW(s.w, prof.units) : '—'}</span><small>${U.unitLabel(prof.units).toUpperCase()}</small>`
+        : `<span>${s.reps}</span><small>${ex.timed ? 'SEC' : 'REPS'}</small>`;
+    };
+    const commit = () => {
+      const raw = (inp.value || '').trim().replace(',', '.');
+      const num = parseFloat(raw);
+      if (raw !== '' && !isNaN(num) && num >= 0) {
+        if (isW) s.w = Math.min(999, Math.round(U.toKg(num, prof.units) * 100) / 100);
+        else s.reps = U.clamp(Math.round(num), 0, ex.timed ? 300 : 100);
+        prof.activeWorkout = w; saveApp();
+      }
+      restore();
+    };
+    inp.addEventListener('blur', commit, { once: true });
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } });
     return;
   }
   if (a === 'wo-mkweighted') {
@@ -3560,7 +3721,7 @@ function showSummary(prof, res) {
 function renderPlanView(prof) {
   const plan = prof.plan;
   const sched = prof.quiz.weekSchedule;
-  const wdFor = i => { for (const [wd, idx] of Object.entries(plan.dayMap || {})) if (+idx === i) return +wd; return null; };
+  const wdFor = i => { for (const [wd, idx] of Object.entries(plan.dayMap || {})) if (+idx === i && !(prof.customMap && prof.customMap[wd])) return +wd; return null; };
   const at = ATHLETE_TYPES[prof.quiz.athleteType || 'gym'];
   const weekCard = sched ? `<div class="card">
       <div class="row"><h3>Your week</h3><span class="spacer"></span><span class="tag">${at.emoji} ${at.label}</span></div>
@@ -3588,8 +3749,9 @@ function renderPlanView(prof) {
       <div class="card day-card">
         <div class="day-head">
           <div class="day-num">${i + 1}</div>
-          <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}</h3>
+          <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}</h3>
           <div class="focus">${d.focus.map(f => GROUP_LABELS[f] || f).join(' · ')} · ~${estMinutes(d)} min</div></div>
+          <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day">✏️</button>
           <button class="btn sm dark" data-a="start-workout" data-idx="${i}">Start</button>
         </div>
         <div class="mt8">
@@ -3620,7 +3782,7 @@ function renderPlanView(prof) {
     </div>
     <div class="card">
       <h3>Fresh block</h3>
-      <p class="muted mt8" style="line-height:1.5">Regenerating rebuilds the week with new exercise choices. Your weights and records carry over.</p>
+      <p class="muted mt8" style="line-height:1.5">Regenerating rebuilds the week with new exercise choices — including any days you’ve edited. Your weights, records and saved custom workouts always carry over.</p>
       <button class="btn ghost block mt12" data-a="plan-regen">🔄 Regenerate plan</button>
     </div>
   </div>`;
@@ -3813,9 +3975,9 @@ function dispatch(e) {
   if (a === 'choose-day') { showChooseDaySheet(prof); return; }
   if (a === 'start-workout') { closeSheet(); Sound.unlock(); startWorkout(prof, +el.dataset.idx); render(); return; }
   // custom workout actions
-  if (a.startsWith('cw-') || a === 'start-custom' || a.startsWith('day-override')) return customAction(a, el, prof);
+  if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
-  if (['wo-exit', 'wo-finish', 'wo-step', 'wo-done', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
+  if (['wo-exit', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
   if (a === 'do-swap') {
     const ei = +el.dataset.ei;
@@ -3980,14 +4142,14 @@ function showBuilderSheet(prof) {
     </div>`;
   }).join('');
   showSheet(`
-    <h3 style="font-size:19px;font-weight:900">${d.id ? 'Edit workout' : 'Build a workout'}</h3>
-    <p class="muted mt8" style="margin-bottom:10px">Your exercises, your order, your scheme. Progression still tracks every lift automatically.</p>
+    <h3 style="font-size:19px;font-weight:900">${d.planIdx != null ? 'Edit this plan day' : d.id ? 'Edit workout' : 'Build a workout'}</h3>
+    <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? 'Change anything — this overwrites the auto-generated day. Regenerating the plan builds it fresh again.' : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
     <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day 🍑" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
     <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e">🧱</div>Add your first exercise below.</div>'}</div>
     <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
     <div class="row mt16">
       ${d.id ? '<button class="btn danger" data-a="cw-delete">Delete</button>' : ''}
-      <button class="btn primary" style="flex:1" data-a="cw-save">${d.id ? 'Save changes' : 'Save workout 💾'}</button>
+      <button class="btn primary" style="flex:1" data-a="cw-save">${d.planIdx != null || d.id ? 'Save changes' : 'Save workout 💾'}</button>
     </div>`);
   const nm = document.getElementById('cw-name');
   if (nm) nm.addEventListener('input', () => { App.cwDraft.name = nm.value; });
@@ -3996,15 +4158,21 @@ function showBuilderSheet(prof) {
 /* exercise picker for the builder */
 function showCwPickSheet(prof) {
   const inW = new Set(App.cwDraft.exercises.map(e => e.exId));
-  const opts = EXERCISES.filter(e => !inW.has(e.id) && e.equip.every(eq => prof.quiz.equipment.includes(eq)));
+  const avail = e => e.equip.every(eq => prof.quiz.equipment.includes(eq));
+  // full library — your build, your rules; kit you haven't ticked is tagged, not hidden
+  const opts = EXERCISES.filter(e => !inW.has(e.id))
+    .slice().sort((a, b) => (avail(b) ? 1 : 0) - (avail(a) ? 1 : 0) || a.name.localeCompare(b.name));
+  const row = e => avail(e) ? exRowHtml(e, 'cw-pick') :
+    exRowHtml(e, 'cw-pick').replace('</button>', `<span class="tag" style="margin-left:6px;flex:none">${e.equip.map(q2 => EQUIP_LABELS[q2]).join('+')}</span></button>`);
   showSheet(`<h3 style="font-size:19px;font-weight:900">Add an exercise</h3>
-    <input class="search mt12" id="cwpick-q" placeholder="Search…" autocomplete="off">
-    <div id="cwpick-list">${opts.slice(0, 14).map(e => exRowHtml(e, 'cw-pick')).join('')}</div>`);
+    <p class="muted mt8">The whole library — ${EXERCISES.length} moves. Kit that isn't in your setup is labelled.</p>
+    <input class="search mt8" id="cwpick-q" placeholder="Search…" autocomplete="off">
+    <div id="cwpick-list">${opts.slice(0, 16).map(row).join('')}</div>`);
   const q = document.getElementById('cwpick-q');
   q.addEventListener('input', () => {
     const v = q.value.toLowerCase();
     document.getElementById('cwpick-list').innerHTML =
-      opts.filter(e => e.name.toLowerCase().includes(v)).slice(0, 16).map(e => exRowHtml(e, 'cw-pick')).join('') || '<div class="empty">No matches.</div>';
+      opts.filter(e => e.name.toLowerCase().includes(v)).slice(0, 20).map(row).join('') || '<div class="empty">No matches.</div>';
   });
 }
 
@@ -4049,7 +4217,13 @@ function showDayOverrideSheet(prof, wd) {
 
 /* ---------- actions ---------- */
 function customAction(a, el, prof) {
-  if (a === 'cw-new') { App.cwDraft = { id: null, name: '', exercises: [] }; showBuilderSheet(prof); return; }
+  if (a === 'cw-new') { App.cwDraft = { id: null, planIdx: null, name: '', exercises: [] }; showBuilderSheet(prof); return; }
+  if (a === 'plan-edit-day') {
+    const i = +el.dataset.idx;
+    const day = prof.plan.days[i]; if (!day) return;
+    App.cwDraft = { id: null, planIdx: i, name: day.name, exercises: JSON.parse(JSON.stringify(day.exercises)) };
+    showBuilderSheet(prof); return;
+  }
   if (a === 'cw-edit') {
     const cw = customById(prof, el.dataset.id); if (!cw) return;
     App.cwDraft = JSON.parse(JSON.stringify({ id: cw.id, name: cw.name, exercises: cw.exercises }));
@@ -4087,6 +4261,15 @@ function customAction(a, el, prof) {
     const d = App.cwDraft;
     if (!d.exercises.length) return toast('Add at least one exercise 💪');
     const name = (d.name || '').trim() || 'My Workout';
+    if (d.planIdx != null) { // overwrite a generated plan day in place
+      const day = prof.plan.days[d.planIdx];
+      day.name = name;
+      day.exercises = d.exercises;
+      day.edited = true;
+      saveApp(); closeSheet(); render();
+      toast(`“${name}” updated — it’s your day now ✏️`);
+      return;
+    }
     if (d.id) {
       const cw = customById(prof, d.id);
       Object.assign(cw, { name, exercises: d.exercises });

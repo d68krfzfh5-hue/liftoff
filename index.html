@@ -496,6 +496,27 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .wo-plates { background: var(--tint); color: var(--ink2); }
 .hist-editrow { background: var(--tint); }
 .paircode { background: var(--tint); color: var(--ink); }
+/* ============ v2.7 — mobility: warm-up/cooldown/relief ============ */
+.mob-card { padding: 13px 16px; }
+.mob-head { background: none; border: none; cursor: pointer; padding: 2px 0; }
+.mob-head h3 { font-size: 15.5px; }
+.mob-row { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.mob-row:last-child { border-bottom: none; }
+.mob-row.done .mob-info { opacity: 0.45; }
+.mob-row.done .nm { text-decoration: line-through; }
+.mob-info { flex: 1; min-width: 0; }
+.mob-info .nm { font-weight: 800; font-size: 13.5px; }
+.mob-info .cue { font-size: 11.5px; color: var(--ink3); line-height: 1.4; margin-top: 1px; }
+.mob-go { flex: none; min-width: 74px; padding: 8px 11px; border: 1.5px solid var(--line); border-radius: 999px;
+  background: var(--surface); font-weight: 800; font-size: 12.5px; font-family: var(--font-d); cursor: pointer; }
+.mob-go.running { background: var(--ink); border-color: var(--ink); color: #fff; }
+.mob-go.on { background: var(--good); border-color: var(--good); color: #fff; }
+.relief-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.relief-cell { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--line); border-radius: var(--rs);
+  background: var(--surface); padding: 12px; cursor: pointer; text-align: left; }
+.relief-cell:active { background: var(--tint); }
+.relief-cell .ic { font-size: 20px; }
+.relief-cell .lb { font-weight: 800; font-size: 13px; }
 
 </style>
 </head>
@@ -2108,6 +2129,151 @@ function exVideo(exId, pref) {
 }
 
 
+/* ============ LiftOff v2.7 — mobility library: warm-ups, cooldowns, relief ============ */
+'use strict';
+
+/* Each move: dyn=true → dynamic (pre-lift), dyn=false → static hold (post-lift / relief).
+   t = seconds for holds/timed moves; reps = rep-based instead. side=true → do both sides.
+   m[] uses the app's muscle keys plus a few mobility-only areas (neck, hipflexors, hips). */
+const STRETCHES = [
+  // ---- dynamic (warm-up) ----
+  { id: 'dy_pulse',     name: 'Pulse raiser — march or easy jacks', dyn: true, t: 40, m: ['fullbody'], cue: 'Get warm and slightly out of breath — nothing heroic.' },
+  { id: 'dy_armcircle', name: 'Arm circles',            dyn: true, t: 30, m: ['shoulders', 'chest', 'upperback'], cue: 'Small circles growing to big, both directions.' },
+  { id: 'dy_swings',    name: 'Cross-body arm swings',  dyn: true, t: 30, m: ['chest', 'shoulders', 'reardelts'], cue: 'Open wide, then hug yourself — loose and rhythmic.' },
+  { id: 'dy_scap',      name: 'Scap squeezes',          dyn: true, reps: 12, m: ['upperback', 'reardelts', 'lats'], cue: 'Arms at 90°, pinch the shoulder blades, no shrugging.' },
+  { id: 'dy_catcow',    name: 'Cat–cow',                dyn: true, reps: 8, m: ['lowerback', 'core', 'upperback'], cue: 'Slow waves through the spine, moving with your breath.' },
+  { id: 'dy_wgs',       name: 'World’s greatest stretch', dyn: true, reps: 5, side: true, m: ['hipflexors', 'hamstrings', 'upperback', 'hips'], cue: 'Long lunge, elbow to instep, then reach to the sky.' },
+  { id: 'dy_legswing',  name: 'Leg swings (front–back)', dyn: true, reps: 10, side: true, m: ['hamstrings', 'hipflexors', 'glutes'], cue: 'Hold something, swing tall — let momentum do the work.' },
+  { id: 'dy_sideswing', name: 'Leg swings (side to side)', dyn: true, reps: 10, side: true, m: ['adductors', 'glutes', 'hips'], cue: 'Across the body and out — keep the hips square.' },
+  { id: 'dy_hipcircle', name: 'Hip circles',            dyn: true, reps: 8, side: true, m: ['hips', 'glutes', 'hipflexors'], cue: 'Big slow circles from the hip, like stirring a pot.' },
+  { id: 'dy_gm',        name: 'Bodyweight good mornings', dyn: true, reps: 10, m: ['hamstrings', 'lowerback', 'glutes'], cue: 'Hands behind head, hinge back until the hamstrings whisper.' },
+  { id: 'dy_airsquat',  name: 'Slow air squats',        dyn: true, reps: 10, m: ['quads', 'glutes', 'adductors'], cue: '3 seconds down, stand tall — grease the exact groove you’re about to load.' },
+  { id: 'dy_bridge',    name: 'Glute bridges',          dyn: true, reps: 12, m: ['glutes', 'hamstrings', 'lowerback'], cue: 'Squeeze at the top for a full second — wake the glutes before they work.' },
+  { id: 'dy_twist',     name: 'Standing torso twists',  dyn: true, reps: 10, side: true, m: ['obliques', 'core', 'lowerback'], cue: 'Arms loose, rotate through the ribs, feet planted.' },
+  { id: 'dy_wrist',     name: 'Wrist rolls & waves',    dyn: true, t: 20, m: ['forearms'], cue: 'Circles both ways, then gentle presses palm-down and palm-up.' },
+  { id: 'dy_ankle',     name: 'Ankle circles & raises', dyn: true, t: 25, m: ['calves'], cue: 'Circles each way, then a few slow calf raises.' },
+  { id: 'dy_pushplus',  name: 'Wall push-up plus',      dyn: true, reps: 10, m: ['chest', 'shoulders', 'core'], cue: 'Push the wall away at the top until the shoulder blades spread.' },
+
+  // ---- static (cooldown & relief) ----
+  { id: 'st_doorchest', name: 'Doorway chest stretch',  dyn: false, t: 30, side: true, m: ['chest', 'shoulders'], cue: 'Forearm on the frame, step through gently — chest open, ribs down.' },
+  { id: 'st_crossbody', name: 'Cross-body shoulder stretch', dyn: false, t: 30, side: true, m: ['shoulders', 'reardelts', 'upperback'], cue: 'Pull the arm across with the opposite hand, shoulder stays down.' },
+  { id: 'st_triceps',   name: 'Overhead triceps stretch', dyn: false, t: 30, side: true, m: ['triceps', 'lats'], cue: 'Elbow to the sky, hand down the spine — gently assist with the other hand.' },
+  { id: 'st_childs',    name: 'Child’s pose',           dyn: false, t: 45, m: ['lats', 'lowerback', 'shoulders'], cue: 'Knees wide, arms long, sink the chest and breathe into the back.' },
+  { id: 'st_cobra',     name: 'Cobra',                  dyn: false, t: 30, m: ['abs', 'core', 'hipflexors'], cue: 'Hips stay down, chest lifts — a long front-body arc, never forced.' },
+  { id: 'st_thread',    name: 'Thread the needle',      dyn: false, t: 30, side: true, m: ['upperback', 'reardelts', 'lats'], cue: 'From all fours, slide one arm under and rest the shoulder down.' },
+  { id: 'st_hamfold',   name: 'Standing hamstring fold', dyn: false, t: 40, m: ['hamstrings', 'lowerback'], cue: 'Soft knees, hang heavy, let gravity do it — no bouncing.' },
+  { id: 'st_quad',      name: 'Standing quad stretch',  dyn: false, t: 30, side: true, m: ['quads', 'hipflexors'], cue: 'Heel to bum, knees together, tuck the tailbone to feel it properly.' },
+  { id: 'st_couch',     name: 'Kneeling hip-flexor stretch', dyn: false, t: 40, side: true, m: ['hipflexors', 'quads'], cue: 'Back knee down, squeeze that glute, shift forward an inch — no arching.' },
+  { id: 'st_fig4',      name: 'Figure-4 glute stretch', dyn: false, t: 40, side: true, m: ['glutes', 'hips'], cue: 'Ankle over knee, pull the standing leg in — sit tall into it.' },
+  { id: 'st_pigeon',    name: 'Pigeon pose',            dyn: false, t: 45, side: true, m: ['glutes', 'hips', 'hipflexors'], cue: 'Front shin across, hips square, fold forward only as far as feels kind.' },
+  { id: 'st_butterfly', name: 'Butterfly',              dyn: false, t: 45, m: ['adductors', 'hips'], cue: 'Soles together, sit tall, let the knees fall — press nothing.' },
+  { id: 'st_straddle',  name: 'Seated straddle reach',  dyn: false, t: 45, m: ['adductors', 'hamstrings', 'lowerback'], cue: 'Legs wide, walk the hands forward with a long spine — inches count.' },
+  { id: 'st_calfwall',  name: 'Wall calf stretch',      dyn: false, t: 30, side: true, m: ['calves'], cue: 'Back leg long, heel glued down, lean until the calf lengthens.' },
+  { id: 'st_downdog',   name: 'Down dog pedal-out',     dyn: false, t: 40, m: ['calves', 'hamstrings', 'lats', 'shoulders'], cue: 'Hips high, pedal the heels one at a time, head relaxed.' },
+  { id: 'st_neck',      name: 'Neck side tilt',         dyn: false, t: 20, side: true, m: ['neck'], cue: 'Ear towards shoulder, opposite hand reaches for the floor. Feather-light.' },
+  { id: 'st_wristflex', name: 'Wrist flexor stretch',   dyn: false, t: 20, side: true, m: ['forearms'], cue: 'Arm long, palm up, gently draw the fingers back.' },
+  { id: 'st_sidebend',  name: 'Standing side bend',     dyn: false, t: 30, side: true, m: ['lats', 'obliques'], cue: 'Reach up and over like you’re painting a rainbow — long, not crunched.' },
+  { id: 'st_knees',     name: 'Knees-to-chest rock',    dyn: false, t: 40, m: ['lowerback', 'glutes'], cue: 'On your back, hug the knees, rock gently side to side.' },
+  { id: 'st_biceps',    name: 'Wall biceps stretch',    dyn: false, t: 25, side: true, m: ['biceps', 'chest', 'forearms'], cue: 'Palm on the wall behind you, arm straight, turn the chest away.' },
+];
+const STRETCH_BY_ID = {};
+for (const s of STRETCHES) STRETCH_BY_ID[s.id] = s;
+
+/* ---------- session-tailored routines ---------- */
+function sessionMuscles(exercises) {
+  const w = {};
+  for (const pe of exercises || []) {
+    const ex = EX_BY_ID[pe.exId]; if (!ex) continue;
+    for (const m of ex.m.p) w[m] = (w[m] || 0) + 2;
+    for (const m of ex.m.s) w[m] = (w[m] || 0) + 1;
+  }
+  return Object.entries(w).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+function pickMoves(muscles, dyn, max) {
+  const chosen = [], used = new Set(), covered = new Set();
+  for (const mu of muscles) {
+    if (chosen.length >= max) break;
+    if (covered.has(mu)) continue;
+    const cand = STRETCHES.find(s => s.dyn === dyn && !used.has(s.id) && s.m.includes(mu));
+    if (cand) {
+      chosen.push(cand); used.add(cand.id);
+      for (const cm of cand.m) covered.add(cm);
+    }
+  }
+  return chosen;
+}
+function warmupRoutineFor(exercises) {
+  const mus = sessionMuscles(exercises);
+  const moves = [STRETCH_BY_ID.dy_pulse, ...pickMoves(mus, true, 4)];
+  return moves.map(s => s.id);
+}
+function cooldownRoutineFor(exercises) {
+  return pickMoves(sessionMuscles(exercises), false, 5).map(s => s.id);
+}
+function routineMinutes(ids) {
+  let sec = 0;
+  for (const id of ids) {
+    const s = STRETCH_BY_ID[id]; if (!s) continue;
+    sec += (s.t ? s.t : s.reps * 3) * (s.side ? 2 : 1) + 8;
+  }
+  return Math.max(1, Math.round(sec / 60));
+}
+
+/* ---------- "feeling tight or sore?" relief ---------- */
+const RELIEF_AREAS = [
+  { id: 'neck',      label: 'Neck & traps',   icon: '🧣', m: ['neck', 'upperback'] },
+  { id: 'shoulders', label: 'Shoulders',      icon: '🦾', m: ['shoulders', 'reardelts'] },
+  { id: 'chest',     label: 'Chest',          icon: '🛡️', m: ['chest'] },
+  { id: 'upperback', label: 'Upper back',     icon: '🪽', m: ['upperback', 'lats'] },
+  { id: 'lowerback', label: 'Lower back',     icon: '🌉', m: ['lowerback'] },
+  { id: 'arms',      label: 'Arms & elbows',  icon: '💪', m: ['biceps', 'triceps', 'forearms'] },
+  { id: 'glutes',    label: 'Glutes & hips',  icon: '🍑', m: ['glutes', 'hips'] },
+  { id: 'hipflexors', label: 'Hip flexors',   icon: '🚶', m: ['hipflexors'] },
+  { id: 'hamstrings', label: 'Hamstrings',    icon: '🦵', m: ['hamstrings'] },
+  { id: 'quads',     label: 'Quads & knees',  icon: '🦿', m: ['quads'] },
+  { id: 'adductors', label: 'Inner thighs',   icon: '🧘', m: ['adductors'] },
+  { id: 'calves',    label: 'Calves & ankles', icon: '🩰', m: ['calves'] },
+];
+const RELIEF_ADVICE = {
+  neck:      'Desk time and heavy shrugging love to park tension here. Keep every stretch feather-light — the neck responds to gentleness, not force. Slow shoulder rolls and a warm shower help more than digging thumbs in.',
+  shoulders: 'Usually worked-hard delts or a stiff upper back masquerading as a shoulder problem. Move it gently through its range, stretch lightly, and ease pressing volume for a day or two if it lingers.',
+  chest:     'Tight pecs pull you into a slouch and can make shoulders ache too. Open the front, strengthen the back — the doorway stretch is your best friend after pressing days.',
+  upperback: 'Stiffness between the blades responds brilliantly to movement — thread the needle and cat–cow beat static sitting every time. A tennis ball against the wall works wonders if you have one.',
+  lowerback: 'Almost always tension, not damage — it calms down with gentle movement, walking and easy stretching, not bed rest. Keep hinging light for a couple of days and let it settle.',
+  arms:      'Pumped or achy arms usually just need blood flow: light movement, easy stretches, and a day before the next arm-heavy session. Sore elbows appreciate slower reps and a break from failure sets.',
+  glutes:    'Deep glute tightness (that "can\'t sit comfortably" feeling) melts with figure-4 and pigeon. Walking helps; sitting all day doesn\'t.',
+  hipflexors: 'The price of sitting + squatting. The kneeling stretch works only if you squeeze the glute and keep the ribs down — an inch of shift beats a deep lean every time.',
+  hamstrings: 'Sore hammies after deadlifts or sprints are normal for 1–3 days. Stretch gently — they hate aggressive pulling when sore. Easy walking and light bridges speed it up.',
+  quads:     'DOMS central after squats and lunges. Gentle quad stretches, easy cycling or walking, and warmth all help. Stairs will be dramatic for a day — that’s normal.',
+  adductors: 'Inner-thigh tightness responds slowly and kindly — butterfly and side lunges held softly, never bounced. Give them extra warm-up before wide-stance work.',
+  calves:    'Tight calves affect squats and ankles more than people think. Stretch with the knee straight AND bent to catch both muscles; slow eccentric heel drops off a step are gold.',
+};
+const RELIEF_REDFLAG = 'Sharp, stabbing or radiating pain, numbness or tingling isn’t normal muscle soreness — ease right off and have a physio or GP take a look. Soreness that’s still severe after 4–5 days deserves a check too.';
+
+function reliefFor(areaId) {
+  const area = RELIEF_AREAS.find(a => a.id === areaId);
+  if (!area) return null;
+  const stretches = [];
+  const used = new Set();
+  for (const mu of area.m) {
+    for (const s of STRETCHES) {
+      if (s.dyn || used.has(s.id) || !s.m.includes(mu)) continue;
+      stretches.push(s); used.add(s.id);
+      if (stretches.length >= 4) break;
+    }
+    if (stretches.length >= 4) break;
+  }
+  // one gentle dynamic mover to finish — motion is lotion
+  const mover = STRETCHES.find(s => s.dyn && s.id !== 'dy_pulse' && s.m.some(mu => area.m.includes(mu)));
+  return { area, advice: RELIEF_ADVICE[areaId], redflag: RELIEF_REDFLAG, stretches, mover };
+}
+
+if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
+  STRETCHES, STRETCH_BY_ID, RELIEF_AREAS, RELIEF_ADVICE,
+  sessionMuscles, warmupRoutineFor, cooldownRoutineFor, routineMinutes, reliefFor,
+});
+
+
 /* ============ LiftOff — coaching logic: plan generator + progression ============ */
 'use strict';
 
@@ -3524,7 +3690,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4141,6 +4307,7 @@ function renderToday(prof) {
         <div class="muted mt8" style="font-size:12.5px;line-height:1.5">${line}</div>
       </div>`;
     })()}
+    ${reliefEntryCardHtml(prof)}
     ${tips.slice(0, 2).map(t => `<div class="card coach-card"><div class="ic">${t.icon}</div><div><div class="tt">${U.esc(t.title)}</div><div class="tx">${U.esc(t.text)}</div>${t.kind === 'deload' ? '<button class="btn sm ghost mt8" data-a="deload-start">Make this an easy week</button>' : ''}</div></div>`).join('')}
   </div>`;
 }
@@ -4160,8 +4327,10 @@ function renderWorkout(prof) {
     </div>
     <div class="ob-progress" style="margin:2px 0 14px"><i style="width:${totalSets ? doneSets / totalSets * 100 : 0}%"></i></div>
     ${w.coachNote ? `<div class="coach-note">📝 <b>${U.esc(prof.coachName || 'Coach')}:</b> ${U.esc(w.coachNote)}</div>` : ''}
+    ${warmupCardHtml(w)}
     ${w.entries.map((e, ei) => renderWorkoutEx(prof, e, ei)).join('')}
     <button class="btn ghost block" data-a="wo-add-ex">+ Add an exercise</button>
+    ${cooldownCardHtml(w)}
     <div style="height:70px"></div>
   </div>`;
 }
@@ -5038,6 +5207,8 @@ function dispatch(e) {
   if (prof && v2Action(a, el, prof)) return;
   // v2.1: coach mode
   if (a.startsWith('co-')) return coachAction(a, el, prof);
+  // v2.7: mobility — warm-up/cooldown rows + relief tool
+  if (a.startsWith('mob-')) return mobAction(a, el, prof);
   // sheets
   if (a === 'sheet-close') return closeSheet();
   if (a === 'tab') { App.view = el.dataset.id; closeSheet(); window.scrollTo(0, 0); render(); return; }
@@ -6083,6 +6254,166 @@ function coachAction(a, el, prof) {
         saveApp(); render();
         toast(isCoach ? 'Coaching link ended' : 'Unpaired — it’s all yours again');
       });
+    return true;
+  }
+  return false;
+}
+
+
+/* ============ LiftOff v2.7 — mobility UI: warm-up/cooldown cards + relief tool ============ */
+'use strict';
+
+/* ---------- shared stretch row with tap-to-run countdown ---------- */
+let _mobIv = null;
+function stopMobTimer() { if (_mobIv) { clearInterval(_mobIv); _mobIv = null; } }
+
+function mobRowHtml(sid, done, ctx, i) {
+  const s = STRETCH_BY_ID[sid]; if (!s) return '';
+  const dur = s.t ? `${s.t}s${s.side ? '/side' : ''}` : `${s.reps}${s.side ? '/side' : ' reps'}`;
+  return `<div class="mob-row ${done ? 'done' : ''}">
+    <div class="mob-info"><div class="nm">${U.esc(s.name)}</div><div class="cue">${U.esc(s.cue)}</div></div>
+    ${s.t
+      ? `<button class="mob-go" data-a="mob-hold" data-ctx="${ctx}" data-i="${i}" data-sid="${sid}"><span id="mob-${ctx}-${i}">${done ? '✓' : '▶ ' + dur}</span></button>`
+      : `<button class="mob-go ${done ? 'on' : ''}" data-a="mob-tick" data-ctx="${ctx}" data-i="${i}">${done ? '✓' : dur}</button>`}
+  </div>`;
+}
+
+/* ---------- workout warm-up / cooldown cards ---------- */
+function ensureMobility(w) {
+  if (!w.wu) {
+    const exs = w.entries.map(e => e.plan || { exId: e.exId });
+    w.wu = warmupRoutineFor(exs).map(sid => ({ sid, done: false }));
+    w.cd = cooldownRoutineFor(exs).map(sid => ({ sid, done: false }));
+    const p = activeProfile(); if (p && p.activeWorkout === w) saveApp();
+  }
+}
+function warmupCardHtml(w) {
+  ensureMobility(w);
+  if (!w.wu.length) return '';
+  const open = !App._wuCollapsed && !w.wu.every(x => x.done);
+  const doneN = w.wu.filter(x => x.done).length;
+  return `<div class="card mob-card">
+    <button class="row mob-head" data-a="mob-collapse" data-k="wu" style="width:100%;text-align:left">
+      <h3>Warm-up</h3><span class="spacer"></span>
+      <span class="muted">${doneN === w.wu.length ? 'done ✓' : `~${routineMinutes(w.wu.map(x => x.sid))} min · for today's muscles`} ${open ? '▾' : '▸'}</span>
+    </button>
+    ${open ? `<div class="mt8">${w.wu.map((x, i) => mobRowHtml(x.sid, x.done, 'wu', i)).join('')}</div>` : ''}
+  </div>`;
+}
+function cooldownCardHtml(w) {
+  ensureMobility(w);
+  if (!w.cd.length) return '';
+  const open = !!App._cdOpen;
+  const doneN = w.cd.filter(x => x.done).length;
+  return `<div class="card mob-card">
+    <button class="row mob-head" data-a="mob-collapse" data-k="cd" style="width:100%;text-align:left">
+      <h3>Cooldown</h3><span class="spacer"></span>
+      <span class="muted">${doneN === w.cd.length && doneN ? 'done ✓' : `~${routineMinutes(w.cd.map(x => x.sid))} min · stretch what you worked`} ${open ? '▾' : '▸'}</span>
+    </button>
+    ${open ? `<div class="mt8">${w.cd.map((x, i) => mobRowHtml(x.sid, x.done, 'cd', i)).join('')}</div>` : ''}
+  </div>`;
+}
+
+/* ---------- relief tool ---------- */
+function reliefEntryCardHtml(prof) {
+  let nudge = '';
+  try {
+    const fr = muscleFreshness(prof);
+    const hot = Object.entries(fr).filter(([m, v]) => v >= 0.5 && MUSCLES[m]).sort((a, b) => b[1] - a[1])[0];
+    if (hot) {
+      const grp = MUSCLES[hot[0]].group;
+      nudge = ` ${GROUP_LABELS[grp] || grp} worked hard recently — a few minutes would go down well.`;
+    }
+  } catch (e) { /* nudge is optional */ }
+  return `<div class="card">
+    <div class="row"><h3>Feeling tight or sore?</h3></div>
+    <p class="muted mt8" style="font-size:13px">Pick the spot and get the right stretches and advice.${U.esc(nudge)}</p>
+    <button class="btn ghost sm mt8" data-a="mob-open">Find relief</button>
+  </div>`;
+}
+function showReliefSheet(areaId) {
+  stopMobTimer();
+  if (!areaId) {
+    showSheet(`<h3 style="font-size:19px;font-weight:900">Where’s feeling it?</h3>
+      <p class="muted mt8" style="margin-bottom:12px">Tight, achy or post-workout sore — pick the area.</p>
+      <div class="relief-grid">
+        ${RELIEF_AREAS.map(a => `<button class="relief-cell" data-a="mob-area" data-id="${a.id}">
+          <span class="ic">${a.icon}</span><span class="lb">${U.esc(a.label)}</span></button>`).join('')}
+      </div>`);
+    return;
+  }
+  const r = reliefFor(areaId);
+  if (!r) return;
+  App._reliefRuns = {}; // per-open tick state
+  showSheet(`<button class="switchback" data-a="mob-open" style="padding-bottom:6px">↩ All areas</button>
+    <h3 style="font-size:19px;font-weight:900">${r.area.icon} ${U.esc(r.area.label)}</h3>
+    <p class="mt8" style="font-size:13.5px;line-height:1.55;color:var(--ink2)">${U.esc(r.advice)}</p>
+    <div class="kicker mt16" style="margin-bottom:6px">Stretch it out — slow breaths, no forcing</div>
+    ${r.stretches.map((s, i) => mobRowHtml(s.id, false, 'rl', i)).join('')}
+    ${r.mover ? `<div class="kicker mt12" style="margin-bottom:6px">Then get it moving</div>${mobRowHtml(r.mover.id, false, 'rl', 99)}` : ''}
+    <div class="coach-note mt12" style="font-size:12.5px">${U.esc(r.redflag)}</div>
+    <button class="btn ghost block mt12" data-a="sheet-close">Done</button>`);
+  App._reliefArea = areaId;
+}
+
+/* ---------- dispatch ---------- */
+function mobAction(a, el, prof) {
+  const w = App.workout;
+  const list = ctx => ctx === 'wu' ? (w && w.wu) : ctx === 'cd' ? (w && w.cd) : null;
+  if (a === 'mob-open') { closeSheet(); showReliefSheet(null); return true; }
+  if (a === 'mob-area') { showReliefSheet(el.dataset.id); return true; }
+  if (a === 'mob-collapse') {
+    if (el.dataset.k === 'wu') App._wuCollapsed = !App._wuCollapsed;
+    else App._cdOpen = !App._cdOpen;
+    render(); return true;
+  }
+  if (a === 'mob-tick') {
+    const arr = list(el.dataset.ctx);
+    if (arr) {
+      const it = arr[+el.dataset.i];
+      it.done = !it.done;
+      if (prof && w) { prof.activeWorkout = w; saveApp(); }
+      render();
+    } else { // relief sheet rep-move: just mark the button
+      el.classList.add('on'); el.textContent = '✓';
+    }
+    return true;
+  }
+  if (a === 'mob-hold') {
+    if (_mobIv) return true; // one at a time
+    const ctx = el.dataset.ctx, i = +el.dataset.i, sid = el.dataset.sid;
+    const s = STRETCH_BY_ID[sid]; if (!s) return true;
+    Sound.unlock();
+    const span = document.getElementById(`mob-${ctx}-${i}`);
+    const sides = s.side ? 2 : 1;
+    let side = 1, left = s.t;
+    el.classList.add('running');
+    _mobIv = setInterval(() => {
+      const sp = document.getElementById(`mob-${ctx}-${i}`);
+      if (!sp) { stopMobTimer(); return; } // view changed
+      left--;
+      if (left <= 3 && left > 0) Sound.tick();
+      if (left <= 0) {
+        if (side < sides) {
+          side++; left = s.t;
+          Sound.timerDone();
+          sp.textContent = `side 2 · ${left}s`;
+          return;
+        }
+        stopMobTimer();
+        Sound.timerDone();
+        el.classList.remove('running');
+        const arr = list(ctx);
+        if (arr && arr[i]) {
+          arr[i].done = true;
+          if (prof && w) { prof.activeWorkout = w; saveApp(); }
+          render();
+        } else { sp.textContent = '✓'; el.classList.add('on'); }
+        return;
+      }
+      sp.textContent = (sides === 2 ? `side ${side} · ` : '') + left + 's';
+    }, 1000);
+    span.textContent = (sides === 2 ? 'side 1 · ' : '') + left + 's';
     return true;
   }
   return false;

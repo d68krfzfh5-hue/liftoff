@@ -446,6 +446,13 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .hist-ok { width: 30px; height: 30px; border: none; border-radius: 50%; background: var(--ink); color: #fff;
   font-weight: 900; cursor: pointer; }
 .hist-del { width: 30px; height: 30px; border: none; border-radius: 50%; background: none; font-size: 14px; cursor: pointer; }
+/* ============ v2.4 — records vault ============ */
+.rmx { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.rmx .c { border: 1.5px solid var(--line); border-radius: 13px; padding: 9px 4px; text-align: center; }
+.rmx .c.off { opacity: 0.45; }
+.rmx .n { font-size: 10.5px; font-weight: 800; color: var(--ink3); letter-spacing: 0.5px; }
+.rmx .v { font-size: 15px; font-weight: 900; margin-top: 2px; }
+.rmx .d { font-size: 10px; color: var(--ink3); font-weight: 700; margin-top: 1px; }
 
 </style>
 </head>
@@ -1180,6 +1187,37 @@ const MuscleMap = (() => {
     return `<g class="mm-body">${BODY}</g>${hi}`;
   }
 
+  /* recovery heat-map: vals = {muscleKey: 0..1 workedness} */
+  function heatColor(t) {
+    const mix = (a, b, u) => Math.round(a + (b - a) * u);
+    const from = [255, 224, 184], to = [255, 77, 61]; // soft peach → hot red
+    const u = Math.max(0, Math.min(1, (t - 0.08) / 0.92));
+    return `rgb(${mix(from[0], to[0], u)},${mix(from[1], to[1], u)},${mix(from[2], to[2], u)})`;
+  }
+  function heatFigure(kind, vals) {
+    let hi = '';
+    for (const [muscle, t] of Object.entries(vals)) {
+      if (t <= 0.04) continue;
+      const regions = MUSCLE_TO_REGIONS[muscle]; if (!regions) continue;
+      const col = heatColor(t);
+      for (const rid of regions) {
+        const r = R[rid]; if (r.fig !== kind) continue;
+        hi += `<g fill="${col}" opacity="${(0.5 + 0.5 * t).toFixed(2)}">${r.s}</g>`;
+      }
+    }
+    return `<g class="mm-body">${BODY}</g>${hi}`;
+  }
+  function heat(vals, opts) {
+    vals = vals || {};
+    const lbl = !opts || opts.labels !== false;
+    return `<svg viewBox="0 0 216 ${lbl ? 184 : 168}" class="musclemap" role="img" aria-label="Muscle recovery map">
+      <g transform="translate(4,2)">${heatFigure('f', vals)}</g>
+      <g transform="translate(112,2)">${heatFigure('b', vals)}</g>
+      ${lbl ? `<text x="54" y="178" class="mm-lbl" text-anchor="middle">FRONT</text>
+      <text x="162" y="178" class="mm-lbl" text-anchor="middle">BACK</text>` : ''}
+    </svg>`;
+  }
+
   function svg(prim, sec, opts) {
     prim = prim || []; sec = sec || [];
     const lbl = opts && opts.labels !== false;
@@ -1190,7 +1228,7 @@ const MuscleMap = (() => {
       <text x="162" y="178" class="mm-lbl" text-anchor="middle">BACK</text>` : ''}
     </svg>`;
   }
-  return { svg };
+  return { svg, heat };
 })();
 
 
@@ -2883,9 +2921,92 @@ function recapData(prof) { // last complete week (Mon–Sun before this week)
   return { from: lastMon, lifts: lifts.length, sport: sport.length, vol: Math.round(vol), sets, pbs, hasAny: lifts.length + sport.length > 0 };
 }
 
+
+/* ---------- muscle recovery map: how worked is each muscle right now? ---------- */
+function muscleFreshness(prof) {
+  const today = U.todayISO();
+  const decay = [1, 0.62, 0.34, 0.13]; // today, yesterday, 2 days, 3 days ago
+  const vals = {};
+  const bump = (m, amt) => { vals[m] = (vals[m] || 0) + amt; };
+  for (const log of (prof.logs || []).slice(-14)) {
+    const d = U.daysBetween(log.date, today);
+    if (d < 0 || d > 3) continue;
+    const k = decay[d];
+    for (const e of log.entries) {
+      const ex = EX_BY_ID[e.exId]; if (!ex) continue;
+      const load = Math.min(1.4, e.sets.length / 3);
+      for (const m of ex.m.p) bump(m, load * k);
+      for (const m of ex.m.s) bump(m, 0.45 * load * k);
+    }
+  }
+  // sport sessions load their muscles too
+  for (const sp of (prof.sportLogs || []).slice(-10)) {
+    const d = U.daysBetween(sp.date, today);
+    if (d < 0 || d > 2) continue;
+    const k = decay[d] * 0.5;
+    const legs = ['quads', 'hamstrings', 'calves', 'glutes'];
+    const swim = ['shoulders', 'lats', 'triceps', 'core'];
+    for (const m of (sp.act === 'swim' ? swim : legs)) bump(m, k);
+  }
+  for (const m of Object.keys(vals)) {
+    if (!MUSCLES[m]) { delete vals[m]; continue; }
+    vals[m] = Math.min(1, vals[m] / 1.6);
+  }
+  return vals;
+}
+function freshnessSummary(vals) {
+  const g = {};
+  for (const [m, v] of Object.entries(vals)) {
+    const grp = (MUSCLES[m] || {}).group; if (!grp) continue;
+    g[grp] = Math.max(g[grp] || 0, v);
+  }
+  const fresh = [], working = [];
+  for (const grp of MUSCLE_GROUPS) ((g[grp] || 0) < 0.25 ? fresh : working).push(GROUP_LABELS[grp] || grp);
+  return { fresh, working };
+}
+
+/* ---------- records vault: everything she's ever lifted, mined ---------- */
+function exerciseRecords(prof, exId) {
+  const ex = EX_BY_ID[exId];
+  const hist = ((prof.exState || {})[exId] || {}).history || [];
+  let bestSet = null, bestVol = null, bestE = null, bestHold = null;
+  const repMax = { 1: null, 3: null, 5: null, 10: null };
+  const timeline = [];
+  let peak = 0;
+  for (const log of prof.logs || []) {
+    for (const e of log.entries) {
+      if (e.exId !== exId) continue;
+      let vol = 0, top = 0;
+      for (const s of e.sets) {
+        const w = s.w || 0; if (!s.reps) continue;
+        if (ex && ex.timed) { if (!bestHold || s.reps > bestHold.sec) bestHold = { sec: s.reps, date: log.date }; continue; }
+        vol += w * s.reps;
+        if (w > top) top = w;
+        if (w > 0) {
+          const e1 = e1rm(w, s.reps);
+          if (!bestE || e1 > bestE.v) bestE = { v: Math.round(e1 * 10) / 10, date: log.date };
+          if (!bestSet || w > bestSet.w || (w === bestSet.w && s.reps > bestSet.reps)) bestSet = { w, reps: s.reps, date: log.date };
+          for (const n of [1, 3, 5, 10]) if (s.reps >= n && (!repMax[n] || w > repMax[n].w)) repMax[n] = { w, reps: s.reps, date: log.date };
+        }
+      }
+      if (vol > 0 && (!bestVol || vol > bestVol.v)) bestVol = { v: Math.round(vol), date: log.date };
+      if (top > peak) { timeline.push({ date: log.date, w: top, prev: peak }); peak = top; }
+    }
+  }
+  return { ex, hist, bestSet, bestVol, bestE, bestHold, repMax, timeline: timeline.slice().reverse() };
+}
+function vaultList(prof) {
+  const ids = new Set();
+  for (const log of prof.logs || []) for (const e of log.entries) ids.add(e.exId);
+  return [...ids].map(id => ({ id, ex: EX_BY_ID[id], r: exerciseRecords(prof, id) }))
+    .filter(x => x.ex && (x.r.bestSet || x.r.bestHold))
+    .sort((a, b) => (b.r.bestSet ? b.r.bestSet.w : 0) - (a.r.bestSet ? a.r.bestSet.w : 0));
+}
+
 if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
   exPref, setExPref, lastPerformance, plateBreakdown, warmupFor, trimSession, estMinutesFor,
   deloadActive, startDeloadWeek, applyDeload, BADGES, badgeStats, newBadges, recapData,
+  muscleFreshness, freshnessSummary, exerciseRecords, vaultList,
 });
 
 
@@ -3298,7 +3419,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3896,6 +4017,22 @@ function renderToday(prof) {
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
       ${lastLog ? `<div class="muted mt8">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</div>` : ''}
     </div>
+    ${(() => {
+      const fr = muscleFreshness(prof);
+      if (!Object.keys(fr).length) return '';
+      const fs = freshnessSummary(fr);
+      const line = fs.fresh.length === 0
+        ? 'Everything has had some love lately — recovery is where the growth happens 😴'
+        : fs.working.length === 0
+          ? 'Fully recovered everywhere — pick a fight with any muscle you like 💥'
+          : `Fresh and ready: <b>${fs.fresh.join(', ')}</b> · easing off: ${fs.working.join(', ')}`;
+      return `<div class="card">
+        <div class="row"><h3>Muscle radar</h3><span class="spacer"></span><span class="muted">last 3 days</span></div>
+        ${MuscleMap.heat(fr)}
+        <div class="mm-key"><span><i style="background:rgba(20,22,34,0.08)"></i>Fresh</span><span><i style="background:#FFD9A8"></i>Easing off</span><span><i style="background:#FF4D3D"></i>Just worked</span></div>
+        <div class="muted mt8" style="font-size:12.5px;line-height:1.5">${line}</div>
+      </div>`;
+    })()}
     ${tips.slice(0, 2).map(t => `<div class="card coach-card"><div class="ic">${t.icon}</div><div><div class="tt">${U.esc(t.title)}</div><div class="tx">${U.esc(t.text)}</div>${t.kind === 'deload' ? '<button class="btn sm ghost mt8" data-a="deload-start">🧘 Make this an easy week</button>' : ''}</div></div>`).join('')}
   </div>`;
 }
@@ -4236,6 +4373,7 @@ function showExerciseSheet(exId, prof) {
         <div><div class="muted">Est. 1RM</div><b style="font-size:17px">${U.fmtW(pr.e1rm, prof.units)}${U.unitLabel(prof.units)}</b></div>` : ''}
         ${st && st.history.length ? `<div><div class="muted">Sessions</div><b style="font-size:17px">${st.history.length}</b></div>` : ''}
       </div>
+      <button class="btn ghost sm block mt8" data-a="rec-open" data-ex="${exId}">🏆 Full records</button>
     </div>` : '';
   const choice = App._vidChoice && App._vidChoice.exId === exId ? App._vidChoice.i : null;
   const vres = exVideo(exId, prof && prof.quiz ? prof.quiz.videoPref : 'auto');
@@ -4631,11 +4769,11 @@ function renderProgress(prof) {
       <div class="muted mt8" style="margin-bottom:6px">Last 7 days · green band = your target zone</div>
       ${Charts.bars(MUSCLE_GROUPS.map(g => ({ label: ({ shoulders: 'Delts', hamstrings: 'Hams' })[g] || GROUP_LABELS[g], value: sets7[g] })), { band })}
     </div>
-    ${prList.length ? `<div class="card"><h3>Recent records</h3><div class="mt8">
-      ${prList.map(([exId, pr]) => `<div class="pr-row"><span class="medal">🏅</span>${U.esc((EX_BY_ID[exId] || {}).name || exId)}
+    ${prList.length ? `<div class="card"><h3>Records</h3><div class="mt8">
+      ${prList.map(([exId, pr]) => `<button class="pr-row" style="width:100%;text-align:left;cursor:pointer" data-a="rec-open" data-ex="${exId}"><span class="medal">🏅</span>${U.esc((EX_BY_ID[exId] || {}).name || exId)}
         <span class="muted" style="margin-left:6px">${U.fmtDateShort(pr.date)}</span>
-        <span class="w">${U.fmtW(pr.w, prof.units)}${U.unitLabel(prof.units)}</span></div>`).join('')}
-    </div></div>` : ''}
+        <span class="w">${U.fmtW(pr.w, prof.units)}${U.unitLabel(prof.units)}</span></button>`).join('')}
+    </div><button class="btn ghost sm block mt8" data-a="vault-open">🏆 Open the records vault</button></div>` : ''}
     ${historyCardHtml(prof)}
     ${shareCardHtml(prof)}
     ${badgesCardHtml(prof)}
@@ -5325,8 +5463,54 @@ function histAfterChange(prof, logId, msg) {
   if (msg) toast(msg);
 }
 
+
+/* ---------- records vault ---------- */
+function showVaultSheet(prof) {
+  const list = vaultList(prof);
+  const u = prof.units;
+  showSheet(`<h3 style="font-size:19px;font-weight:900">🏆 Records vault</h3>
+    <p class="muted mt8" style="margin-bottom:10px">Every lift you've logged, best first. Tap one for the full story.</p>
+    ${list.map(x => `<button class="pr-row" style="width:100%;text-align:left;cursor:pointer" data-a="rec-open" data-ex="${x.id}">
+      <span class="medal">${x.ex.timed ? '⏱' : '🏋️'}</span>${U.esc(x.ex.name)}
+      <span class="muted" style="margin-left:6px">${U.fmtDateShort((x.r.bestSet || x.r.bestHold).date)}</span>
+      <span class="w">${x.r.bestSet ? U.fmtW(x.r.bestSet.w, u) + U.unitLabel(u) : x.r.bestHold.sec + 's'}</span>
+    </button>`).join('') || '<div class="empty" style="padding:18px"><div class="e">🏆</div>Log a few workouts and the vault fills itself.</div>'}
+    <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
+}
+
+function showRecordsSheet(prof, exId) {
+  const r = exerciseRecords(prof, exId);
+  const ex = r.ex; if (!ex) return;
+  const u = prof.units, ul = U.unitLabel(u);
+  const tile = (v, l) => `<div class="s"><div class="v" style="font-size:17px">${v}</div><div class="l">${l}</div></div>`;
+  const tiles = ex.timed
+    ? `<div class="sum-stats">${tile(r.bestHold ? r.bestHold.sec + 's' : '—', 'longest hold')}${tile(r.hist.length, 'sessions')}${tile('', '')}</div>`
+    : `<div class="sum-stats">
+        ${tile(r.bestSet ? U.fmtW(r.bestSet.w, u) + ul + '×' + r.bestSet.reps : '—', 'best set')}
+        ${tile(r.bestE ? U.fmtW(r.bestE.v, u) + ul : '—', 'est. 1RM')}
+        ${tile(r.bestVol ? U.compact(r.bestVol.v) + 'kg' : '—', 'best session')}
+      </div>`;
+  const rmx = !ex.timed ? `<div class="kicker mt16" style="margin-bottom:8px">Rep maxes — heaviest at each rep count</div>
+    <div class="rmx">${[1, 3, 5, 10].map(n => {
+      const m = r.repMax[n];
+      return `<div class="c ${m ? '' : 'off'}"><div class="n">${n}RM</div><div class="v">${m ? U.fmtW(m.w, u) + ul : '—'}</div>${m ? `<div class="d">${U.fmtDateShort(m.date)}</div>` : ''}</div>`;
+    }).join('')}</div>` : '';
+  const chart = r.hist.length >= 2
+    ? Charts.line([{ label: 'Top set', pts: r.hist.slice(-16).map(h => ({ x: U.fmtDateShort(h.date), y: u === 'lb' ? Math.round(h.topW * 2.20462 * 10) / 10 : h.topW })) }], { h: 140 })
+    : '';
+  const tl = r.timeline.length ? `<div class="kicker mt16" style="margin-bottom:8px">Record timeline</div>
+    ${r.timeline.slice(0, 8).map(t => `<div class="pr-row"><span class="medal">📈</span>${U.fmtDateShort(t.date)}
+      <span class="w">${U.fmtW(t.w, u)}${ul}${t.prev ? ` <small style="color:var(--good-text);font-weight:800">+${U.fmtW(t.w - t.prev, u)}</small>` : ''}</span></div>`).join('')}` : '';
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${U.esc(ex.name)}</h3>
+    <p class="muted mt8" style="margin-bottom:12px">${r.hist.length} ${U.plural(r.hist.length, 'session')} logged</p>
+    ${tiles}${chart ? `<div class="mt12">${chart}</div>` : ''}${rmx}${tl}
+    <button class="btn ghost block mt16" data-a="sheet-close">Close</button>`);
+}
+
 /* ---------- v2 dispatch ---------- */
 function v2Action(a, el, prof) {
+  if (a === 'vault-open') { closeSheet(); showVaultSheet(prof); return true; }
+  if (a === 'rec-open') { App._vidChoice = null; closeSheet(); showRecordsSheet(prof, el.dataset.ex); return true; }
   if (a === 'hist-open') { App._histEdit = null; App._histLog = el.dataset.id; closeSheet(); showHistorySheet(prof, el.dataset.id); return true; }
   if (a === 'hist-more') { App._histAll = !App._histAll; render(); return true; }
   if (a === 'hist-set') { App._histEdit = { ei: +el.dataset.ei, si: +el.dataset.si }; showHistorySheet(prof, App._histLog); return true; }
@@ -5528,6 +5712,14 @@ function renderCoachProgress(prof) {
         return `<div class="pr-row"><span class="medal">${l.react ? REACT_EMOJI[l.react] || '🏋️' : '🏋️'}</span>${U.esc(l.dayName)}${l.note ? ` <span class="muted" style="font-size:11.5px">“${U.esc(l.note.slice(0, 32))}${l.note.length > 32 ? '…' : ''}”</span>` : ''}<span class="muted" style="margin-left:6px">${U.fmtDateShort(l.date)}</span><span class="w" style="font-size:12px">${U.esc(top || l.durationMin + ' min')}</span></div>`;
       }).join('')}
     </div></div>` : ''}
+    ${(() => {
+      const fr = muscleFreshness(shim);
+      if (!Object.keys(fr).length) return '';
+      return `<div class="card"><div class="row"><h3>${U.esc(pg.name)}’s muscle radar</h3><span class="spacer"></span><span class="muted">last 3 days</span></div>
+        ${MuscleMap.heat(fr)}
+        <div class="mm-key"><span><i style="background:rgba(20,22,34,0.08)"></i>Fresh</span><span><i style="background:#FFD9A8"></i>Easing off</span><span><i style="background:#FF4D3D"></i>Just worked</span></div>
+      </div>`;
+    })()}
     ${heatmapCardHtml(shim)}
     ${badgesCardHtml(shim)}
   </div>`;

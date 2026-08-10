@@ -2,7 +2,7 @@
    Strategy: network-first for the app page (updates always land when online,
    cached copy serves offline); cache-first for static assets (icons, manifest).
    Cache name is versioned; bump VERSION together with APP_VERSION at release. */
-const VERSION = '2.4.0';
+const VERSION = '2.5.0';
 const CACHE = 'liftoff-v' + VERSION;
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
@@ -45,4 +45,12 @@ self.addEventListener('fetch', e => {
       return hit || refresh;
     })
   );
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    for (const c of cs) if ('focus' in c) return c.focus();
+    return clients.openWindow('./');
+  }));
 });

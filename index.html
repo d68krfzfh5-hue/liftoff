@@ -2367,6 +2367,68 @@ function detectPRs(profile, log) {
   return out;
 }
 
+/* ---------- forgiving exercise search: any word order, partials, shorthand, small typos ---------- */
+const EX_SEARCH_ALIASES = {
+  db: 'dumbbell', bb: 'barbell', kb: 'kettlebell', bw: 'bodyweight', mach: 'machine',
+  rdl: 'romanian', ohp: 'overhead', lat: 'lats', delt: 'shoulders', pec: 'chest',
+  quad: 'quads', ham: 'hamstrings', glute: 'glutes', tri: 'triceps', bi: 'biceps',
+};
+function _exNorm(str) { return String(str || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/ +/g, ' ').trim(); }
+function _exHay(ex) {
+  if (!ex._hay) {
+    const bits = [ex.name, ex.name.replace(/[^a-zA-Z0-9]+/g, '')]; // "Push-Up" matches both "push up" and "pushup"
+    for (const m of ex.m.p.concat(ex.m.s)) { const mu = MUSCLES[m]; if (mu) bits.push(mu.label, mu.group); bits.push(m); }
+    bits.push(...ex.equip);
+    if (ex.pattern) bits.push(ex.pattern);
+    ex._hay = _exNorm(bits.join(' '));
+  }
+  return ex._hay;
+}
+function _lev1(a, b) { // within one edit — substitution, adjacent swap, insert or delete
+  if (a === b) return true;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  if (la === lb) {
+    const diff = [];
+    for (let i = 0; i < la && diff.length <= 2; i++) if (a[i] !== b[i]) diff.push(i);
+    if (diff.length === 1) return true; // one wrong letter
+    return diff.length === 2 && diff[1] === diff[0] + 1
+      && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]]; // adjacent transposition
+  }
+  const sh = la < lb ? a : b, lo = la < lb ? b : a; // one missing/extra letter
+  let i = 0, j = 0, edits = 0;
+  while (i < sh.length && j < lo.length) {
+    if (sh[i] === lo[j]) { i++; j++; }
+    else if (++edits > 1) return false;
+    else j++;
+  }
+  return true;
+}
+function exSearchFilter(list, query) {
+  const qn = _exNorm(query);
+  if (!qn) return list;
+  const toks = qn.split(' ').map(t => EX_SEARCH_ALIASES[t] || t);
+  const joined = toks.join('');
+  const scored = [];
+  for (const ex of list) {
+    const hay = _exHay(ex);
+    const nameN = _exNorm(ex.name);
+    if (toks.every(t => hay.includes(t))) {
+      const score = nameN.startsWith(qn) || _exNorm(ex.name).replace(/ /g, '').startsWith(joined) ? 0
+        : toks.every(t => nameN.includes(t)) ? 1 : 2;
+      scored.push([score, ex]);
+    }
+  }
+  if (!scored.length) { // typo fallback: each token within one edit of some word in the haystack
+    for (const ex of list) {
+      const words = _exHay(ex).split(' ');
+      if (toks.every(t => t.length >= 4 ? words.some(w => w.includes(t) || _lev1(t, w)) : words.some(w => w.includes(t))))
+        scored.push([3, ex]);
+    }
+  }
+  return scored.sort((a, b) => a[0] - b[0]).map(x => x[1]);
+}
+
 /* replay all logs → fresh exercise histories + PRs. Progression targets (st.w etc.) are
    deliberately preserved: fixing a typo in the past shouldn't change next week's prescription. */
 function rebuildDerived(profile) {
@@ -3419,7 +3481,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3628,7 +3690,10 @@ const WakeLock = {
   async on() { try { this.s = await navigator.wakeLock.request('screen'); } catch (e) { } },
   off() { try { this.s && this.s.release(); } catch (e) { } this.s = null; },
 };
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && App.workout) WakeLock.on(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && App.workout) WakeLock.on();
+  if (document.visibilityState === 'visible' && App.restTimer) _restTick();
+});
 
 /* never silently bin a paused workout that has ticked sets */
 function guardPausedThen(prof, fn) {
@@ -4128,29 +4193,71 @@ function renderRest() {
   </div>`;
 }
 
-function startRest(sec) {
+/* rest timer is wall-clock based: leaving the app, locking the phone or reloading
+   never loses time — on return it shows the true remaining (or has finished). */
+function _restTick() {
+  const r = App.restTimer; if (!r) return;
+  const remaining = (r.endTs - Date.now()) / 1000;
+  const el = document.getElementById('rest');
+  if (el) {
+    el.querySelector('.num').textContent = U.fmtDur(Math.max(0, Math.ceil(remaining)));
+    el.querySelector('.bar i').style.width = U.clamp(remaining / r.total * 100, 0, 100) + '%';
+  }
+  if (remaining <= 0) {
+    const wasHidden = document.visibilityState === 'hidden';
+    stopRest();
+    Sound.timerDone();
+    if (wasHidden) notifyRestDone();
+    else toast('Rest done — next set! 💥');
+  }
+}
+function _restStartAt(endTs, total) {
   stopRest();
-  App.restTimer = { total: sec, remaining: sec, iv: setInterval(() => {
-    const r = App.restTimer; if (!r) return;
-    r.remaining -= 0.25;
-    const el = document.getElementById('rest');
-    if (el) {
-      el.querySelector('.num').textContent = U.fmtDur(Math.max(0, Math.ceil(r.remaining)));
-      el.querySelector('.bar i').style.width = (Math.max(0, r.remaining) / r.total * 100) + '%';
-    }
-    if (r.remaining <= 0) {
-      Sound.timerDone();
-      stopRest();
-      toast('Rest done — next set! 💥');
-    }
-  }, 250) };
-  const host = document.getElementById('rest');
-  if (host) host.remove();
+  App.restTimer = { total, endTs, iv: setInterval(_restTick, 250) };
+  if (App.workout) {
+    App.workout.restEndTs = endTs; App.workout.restTotal = total;
+    const p = activeProfile(); if (p) { p.activeWorkout = App.workout; saveApp(); }
+  }
   document.body.insertAdjacentHTML('beforeend', renderRest());
+  _restTick();
+}
+function startRest(sec) {
+  _restStartAt(Date.now() + sec * 1000, sec);
+  askNotifPermissionOnce();
+}
+function resumeRest() { // called on boot when a workout was mid-rest
+  const w = App.workout;
+  if (!w || !w.restEndTs) return;
+  if (w.restEndTs > Date.now() + 500) _restStartAt(w.restEndTs, w.restTotal || 60);
+  else {
+    delete w.restEndTs; delete w.restTotal;
+    toast('Rest finished while you were away — back to it 💥');
+  }
 }
 function stopRest() {
   if (App.restTimer) { clearInterval(App.restTimer.iv); App.restTimer = null; }
+  if (App.workout) { delete App.workout.restEndTs; delete App.workout.restTotal; }
   const el = document.getElementById('rest'); if (el) el.remove();
+}
+function notifyRestDone() {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const opts = { body: 'Back to it — your next set is ready 💥', tag: 'liftoff-rest',
+      icon: 'icon-192.png', badge: 'icon-192.png', vibrate: [120, 60, 120] };
+    if (navigator.serviceWorker && navigator.serviceWorker.controller)
+      navigator.serviceWorker.ready.then(reg => reg.showNotification('⏱ Rest done!', opts)).catch(() => {});
+    else new Notification('⏱ Rest done!', opts);
+  } catch (e) { /* notifications unavailable — timer itself stays correct */ }
+}
+function askNotifPermissionOnce() {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'default') return;
+    if (App.data.notifAsked) return;
+    App.data.notifAsked = true; saveApp();
+    Notification.requestPermission().then(p => {
+      if (p === 'granted') toast('🔔 You’ll get a ping when rest ends — even off the app');
+    }).catch(() => {});
+  } catch (e) { /* fine */ }
 }
 
 function afterWorkoutRender(prof) {
@@ -4308,7 +4415,15 @@ function workoutAction(a, el, prof) {
   if (a === 'wo-how') { App._vidChoice = null; showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'wo-swap') { showSwapSheet(+el.dataset.ei, prof); return; }
   if (a === 'wo-add-ex') { showAddExSheet(prof); return; }
-  if (a === 'rest-add') { if (App.restTimer) { App.restTimer.remaining += 30; App.restTimer.total += 30; } return; }
+  if (a === 'rest-add') {
+    const r = App.restTimer;
+    if (r) {
+      r.endTs += 30000; r.total += 30;
+      if (App.workout) { App.workout.restEndTs = r.endTs; App.workout.restTotal = r.total; saveApp(); }
+      _restTick();
+    }
+    return;
+  }
   if (a === 'rest-skip') { stopRest(); return; }
   if (a === 'wo-finish') {
     const stats = workoutStats(w);
@@ -4518,7 +4633,7 @@ function showAddExSheet(prof) {
   q.addEventListener('input', () => {
     const v = q.value.toLowerCase();
     document.getElementById('addex-list').innerHTML =
-      opts.filter(e => e.name.toLowerCase().includes(v)).slice(0, 14).map(e => exRowHtml(e, 'do-add')).join('') || '<div class="empty">No matches.</div>';
+      exSearchFilter(opts, v).slice(0, 14).map(e => exRowHtml(e, 'do-add')).join('') || '<div class="empty">No matches — try fewer letters.</div>';
   });
 }
 function showChooseDaySheet(prof) {
@@ -4693,7 +4808,7 @@ function renderPrefsSheet(prof) {
 function renderLibrary(prof) {
   const f = App.libFilter;
   const list = EXERCISES.filter(e => {
-    if (f.q && !e.name.toLowerCase().includes(f.q.toLowerCase())) return false;
+    if (f.q && !exSearchFilter([e], f.q).length) return false;
     if (f.group && !exCoarseGroups(e).includes(f.group) && !e.m.s.some(m => MUSCLES[m].group === f.group)) return false;
     if (f.equip === 'mine' && !e.equip.every(eq => prof.quiz.equipment.includes(eq))) return false;
     return true;
@@ -4841,6 +4956,12 @@ function renderProfileView(prof) {
       </div>
       <div class="set-row"><div><div class="l">Units</div><div class="d">Weights shown in ${prof.units === 'lb' ? 'pounds' : 'kilograms'}</div></div>
         <div class="seg" style="margin:0;width:130px"><button class="${prof.units === 'kg' ? 'on' : ''}" data-a="set-units" data-v="kg">kg</button><button class="${prof.units === 'lb' ? 'on' : ''}" data-a="set-units" data-v="lb">lb</button></div>
+      </div>
+      <div class="set-row"><div><div class="l">Rest-timer ping</div><div class="d">Notify when rest ends, even off the app</div></div>
+        ${!('Notification' in window) ? '<span class="muted">n/a on this phone</span>'
+          : Notification.permission === 'granted' ? '<span style="color:var(--good-text);font-weight:800">On ✓</span>'
+          : Notification.permission === 'denied' ? '<span class="muted" style="font-size:12px">blocked — allow in browser settings</span>'
+          : '<button class="btn sm ghost" data-a="notif-enable">Enable</button>'}
       </div>
       <div class="set-row"><div><div class="l">Barbell weight</div><div class="d">Used for the plate maths in workouts</div></div>
         <div class="seg" style="margin:0;width:170px">${[10, 15, 20].map(v => `<button class="${(prof.barKg || 20) === v ? 'on' : ''}" data-a="set-barkg" data-v="${v}">${v}kg</button>`).join('')}</div>
@@ -4990,6 +5111,12 @@ function dispatch(e) {
   if (a === 'prof-add') { App.creating = true; App.onboarding = null; render(); return; }
   if (a === 'set-units') { prof.units = el.dataset.v; saveApp(); render(); return; }
   if (a === 'set-barkg') { prof.barKg = +el.dataset.v; saveApp(); render(); toast(`Plate maths now assumes a ${prof.barKg}kg bar 🏋️`); return; }
+  if (a === 'notif-enable') {
+    try {
+      Notification.requestPermission().then(p => { render(); toast(p === 'granted' ? '🔔 Rest-timer pings are on' : 'No worries — the timer still works perfectly in the app'); });
+    } catch (e) { toast('Notifications aren’t available on this phone'); }
+    return;
+  }
   if (a === 'data-export') { exportBackup(); toast('Backup downloaded 💾'); return; }
   if (a === 'data-import') {
     const inp = document.getElementById('import-file');
@@ -5090,7 +5217,7 @@ function showCwPickSheet(prof) {
   q.addEventListener('input', () => {
     const v = q.value.toLowerCase();
     document.getElementById('cwpick-list').innerHTML =
-      opts.filter(e => e.name.toLowerCase().includes(v)).slice(0, 20).map(row).join('') || '<div class="empty">No matches.</div>';
+      exSearchFilter(opts, v).slice(0, 20).map(row).join('') || '<div class="empty">No matches — try fewer letters.</div>';
   });
 }
 
@@ -5939,12 +6066,12 @@ document.body.addEventListener('input', e => {
     const host = document.getElementById('lib-list');
     if (host && prof) {
       const f = App.libFilter;
-      const list = EXERCISES.filter(x => {
-        if (f.q && !x.name.toLowerCase().includes(f.q.toLowerCase())) return false;
+      const base = EXERCISES.filter(x => {
         if (f.group && !exCoarseGroups(x).includes(f.group) && !x.m.s.some(m => MUSCLES[m].group === f.group)) return false;
         if (f.equip === 'mine' && !x.equip.every(eq => prof.quiz.equipment.includes(eq))) return false;
         return true;
       });
+      const list = f.q ? exSearchFilter(base, f.q) : base;
       host.innerHTML = list.map(x => exRowHtml(x, 'ex-open')).join('') || '<div class="empty"><div class="e">🤷</div>No matches — try clearing filters.</div>';
     }
   }
@@ -5955,6 +6082,7 @@ window.addEventListener('beforeunload', () => { if (_saveT) { clearTimeout(_save
 
 loadApp();
 render();
+if (App.workout && App.workout.restEndTs && typeof resumeRest === 'function') resumeRest();
 // coach sync: check on boot, on regaining focus/network, and gently in the background
 if (typeof syncTick === 'function') {
   setTimeout(() => syncTick(true), 900);

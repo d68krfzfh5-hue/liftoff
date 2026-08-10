@@ -10,6 +10,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="LiftOff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23FF4D3D'/%3E%3Cstop offset='1' stop-color='%23FF9F1C'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='24' fill='url(%23g)'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E">
 <style>
 /* ============ LiftOff — bold & energetic design system ============ */
@@ -374,6 +376,49 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .step .v.tappable { cursor: text; }
 .step .v.tappable > span { border-bottom: 1.5px dashed rgba(20,22,34,0.22); padding-bottom: 1px; }
 .step-input { width: 100%; max-width: 74px; border: 0; background: transparent; text-align: center; font-weight: 800; font-size: 15.5px; outline: none; color: var(--ink); padding: 0; }
+
+/* ============ v2.0 — in-gym, badges, heatmap, prefs ============ */
+.wo-last { font-size: 12px; color: var(--ink3); font-weight: 600; margin-top: 3px; }
+.wo-plates { font-size: 12px; color: var(--ink2); font-weight: 700; margin-top: 3px;
+  background: var(--grad-soft); display: inline-block; padding: 3px 9px; border-radius: 999px; }
+.setrow.warmrow { opacity: 0.82; }
+.setrow.warmrow .warmcell { font-size: 11px; font-weight: 800; color: #C2400C; text-transform: uppercase; letter-spacing: 0.4px; text-align: center; }
+.setrow.warmrow .wv { font-size: 13.5px; font-weight: 700; color: var(--ink2); }
+.step.holdgo { grid-column: span 2; background: var(--ink); color: #fff; border-radius: var(--rs);
+  font-weight: 800; font-size: 14px; padding: 10px; border: none; }
+.step.holdgo.running { background: var(--grad); animation: pulse 1s ease infinite; }
+.trim-link { background: none; border: none; color: #fff; font-weight: 800; font-size: 13px;
+  text-decoration: underline; text-underline-offset: 3px; opacity: 0.92; padding: 6px 0 0; cursor: pointer; }
+.pr-banner.badgeb { background: linear-gradient(135deg, #FF7A1A, #FFB020); box-shadow: 0 6px 18px rgba(255, 140, 20, 0.35); }
+/* badges */
+.badges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.badge { border: 1.5px solid var(--line); border-radius: var(--rs); padding: 10px 6px; text-align: center; opacity: 0.55; filter: grayscale(0.9); }
+.badge.got { opacity: 1; filter: none; border-color: transparent; background: var(--grad-soft); box-shadow: 0 3px 10px rgba(255, 90, 40, 0.12); }
+.badge .bi { font-size: 24px; }
+.badge .bn { font-size: 11px; font-weight: 800; margin-top: 3px; line-height: 1.2; }
+.badge .bp { font-size: 10px; color: var(--ink3); font-weight: 700; margin-top: 2px; }
+/* heatmap */
+.hm { display: flex; gap: 4px; justify-content: space-between; }
+.hm-col { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.hm-col i { display: block; width: 100%; aspect-ratio: 1; border-radius: 4px; background: rgba(20, 22, 34, 0.06); }
+.hm-col i.lift { background: var(--grad); }
+.hm-col i.sport { background: #2a78d6; }
+.hm-col i.both { background: linear-gradient(135deg, #FF4D3D 50%, #2a78d6 50%); }
+.hm-col i.fut { background: none; border: 1px dashed var(--line); }
+.hm-key { display: flex; gap: 14px; font-size: 11.5px; color: var(--ink3); font-weight: 700; }
+.hm-key i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; background: rgba(20,22,34,0.06); }
+.hm-key .lift, .hm-key span:nth-child(1) i { background: var(--grad); }
+.hm-key span:nth-child(2) i { background: #2a78d6; }
+.hm-key span:nth-child(3) i { background: linear-gradient(135deg, #FF4D3D 50%, #2a78d6 50%); }
+/* exercise preference buttons */
+.prefrow { display: flex; gap: 9px; }
+.prefbtn { flex: 1; border: 1.5px solid var(--line); background: var(--surface); border-radius: var(--rs);
+  padding: 11px; font-weight: 800; font-size: 13.5px; color: var(--ink2); cursor: pointer; }
+.prefbtn.on-fav { border-color: transparent; background: var(--grad-soft); color: #C2400C; }
+.prefbtn.on-ban { border-color: transparent; background: #FBE9E7; color: #C0302C; }
+/* builder superset toggle */
+.cwx-ctl.cwx-link.on { background: #F1EDFF; color: #6B3FD9; border-color: transparent; }
+@keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
 
 </style>
 </head>
@@ -2050,6 +2095,10 @@ function pickExercise(slot, ctx) {
     if (usedInPlan.has(e.id)) s -= (q.goal === 'strength' && slot.type === 'comp') ? 0 : 22;
     // stable per-profile flavour
     s += (U.hashStr(seedBase + e.id) % 1000) / 1000 * 6;
+    // her favourites bubble up; "not for me" sinks to last resort
+    const pref = (profile.exPrefs || {})[e.id];
+    if (pref === 'fav') s += 18;
+    if (pref === 'ban') s -= 200;
     return { e, s };
   });
   scored.sort((a, b) => b.s - a.s);
@@ -2251,7 +2300,8 @@ function alternativesFor(profile, exId) {
   const cur = EX_BY_ID[exId]; if (!cur) return [];
   const q = profile.quiz;
   const maxLvl = EXPERIENCE[q.experience].maxLvl;
-  return EXERCISES.filter(e => e.id !== exId && e.lvl <= maxLvl && e.equip.every(eq => q.equipment.includes(eq)) &&
+  return EXERCISES.filter(e => e.id !== exId && e.lvl <= maxLvl && (profile.exPrefs || {})[e.id] !== 'ban' &&
+    e.equip.every(eq => q.equipment.includes(eq)) &&
     (e.pattern === cur.pattern || e.m.p.some(m => cur.m.p.includes(m))))
     .sort((a, b) => (b.pattern === cur.pattern ? 1 : 0) - (a.pattern === cur.pattern ? 1 : 0));
 }
@@ -2481,7 +2531,12 @@ function migrateProfile(p) {
   if (!p.quiz.videoPref) p.quiz.videoPref = 'auto';
   if (!p.customWorkouts) p.customWorkouts = [];
   if (!p.customMap) p.customMap = {};
+  if (!p.exPrefs) p.exPrefs = {};
+  if (!p.badges) p.badges = {};
+  if (!p.bodyLogs) p.bodyLogs = [];
+  if (!p.barKg) p.barKg = 20;
   if (p.plan && !p.plan.dayMap) p.plan.dayMap = assignDayMap(p.plan, p.quiz.weekSchedule);
+  if (!p.plan && p.quiz.goal) { try { p.plan = generatePlan(p); } catch (e) { /* keep going — Today view guards */ } }
   return p;
 }
 
@@ -2603,6 +2658,151 @@ function coachTips(profile) {
 if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
   ATHLETE_TYPES, ACTIVITIES, WEEKDAYS, WEEKDAYS_FULL, defaultSchedule, scheduleFromDays, liftDaysOf,
   dayLegScore, assignDayMap, migrateProfile, recentWins, coachTips, nextLiftInfo, workoutForWeekday,
+});
+
+
+/* ============ LiftOff v2.0 — smarter coach, badges, in-gym helpers (logic layer) ============ */
+'use strict';
+
+/* ---------- exercise preferences: favourites & not-for-me ---------- */
+function exPref(prof, exId) { return (prof.exPrefs || {})[exId] || null; }
+function setExPref(prof, exId, val) {
+  prof.exPrefs = prof.exPrefs || {};
+  if (val) prof.exPrefs[exId] = val; else delete prof.exPrefs[exId];
+}
+
+/* ---------- last performance for inline display ---------- */
+function lastPerformance(prof, exId) {
+  const logs = prof.logs || [];
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const e = logs[i].entries.find(x => x.exId === exId);
+    if (e && e.sets.length) {
+      const ex = EX_BY_ID[exId];
+      const parts = e.sets.map(s => (ex && (ex.timed || (ex.bw && !(s.w > 0)))) ? `${s.reps}${ex.timed ? 's' : ''}` : `${U.fmtW(s.w, prof.units)}×${s.reps}`);
+      return { date: logs[i].date, str: parts.join(', ') };
+    }
+  }
+  return null;
+}
+
+/* ---------- plate maths (per side) ---------- */
+function plateBreakdown(totalKg, barKg) {
+  const perSide = (totalKg - barKg) / 2;
+  if (perSide <= 0) return null;
+  const plates = [25, 20, 15, 10, 5, 2.5, 1.25, 0.5];
+  let rem = perSide; const used = [];
+  for (const p of plates) { while (rem >= p - 1e-9) { used.push(p); rem = Math.round((rem - p) * 100) / 100; } }
+  if (!used.length) return null;
+  return { perSide: Math.round(perSide * 100) / 100, plates: used, exact: rem < 1e-9 };
+}
+
+/* ---------- warm-up ramp for the first heavy compound ---------- */
+function warmupFor(prof, entry) {
+  const ex = EX_BY_ID[entry.exId];
+  if (!ex || ex.bw || ex.timed || ex.cat !== 'compound') return null;
+  const w = entry.sets[0] && entry.sets[0].w;
+  if (!w || w < 20) return null;
+  const r = v => U.round(v, 2.5);
+  const sets = [{ w: r(w * 0.5), reps: 8, done: false }, { w: r(w * 0.75), reps: 4, done: false }];
+  if (sets[0].w >= w || sets[1].w >= w) return null;
+  return sets;
+}
+
+/* ---------- time-crunched session trimming ---------- */
+function estMinutesFor(exs) {
+  let s = 6;
+  for (const pe of exs) s += pe.sets * ((pe.rest || 60) + 40) / 60;
+  return Math.round(s);
+}
+function trimSession(exercises, targetMin) {
+  // keep plan order (compounds first); take exercises while they fit, then shave isolation sets
+  let list = [];
+  for (const pe of exercises) {
+    const trial = list.concat([JSON.parse(JSON.stringify(pe))]);
+    if (estMinutesFor(trial) <= targetMin || list.length === 0) list = trial;
+  }
+  let guard = 12;
+  while (estMinutesFor(list) > targetMin && guard--) {
+    const cand = [...list].reverse().find(pe => pe.sets > 2 && pe.slotType !== 'comp') || [...list].reverse().find(pe => pe.sets > 2);
+    if (!cand) break;
+    cand.sets -= 1;
+  }
+  return { exercises: list, est: estMinutesFor(list), dropped: exercises.length - list.length };
+}
+
+/* ---------- deload (easy) week ---------- */
+function deloadActive(prof, dateISO) {
+  return !!(prof.flags && prof.flags.deloadWeek && prof.flags.deloadWeek === U.weekKey(dateISO || U.todayISO()));
+}
+function startDeloadWeek(prof) {
+  prof.flags = prof.flags || {};
+  prof.flags.deloadWeek = U.weekKey(U.todayISO());
+  prof.flags.deloadSuggested = true;
+}
+function applyDeload(prof, planEx, target) { // adjust prefilled targets during an easy week
+  const ex = EX_BY_ID[planEx.exId];
+  const t = Object.assign({}, target);
+  t.sets = Math.max(2, (planEx.sets || 3) - 1);
+  if (t.w != null && ex && !ex.bw && !ex.timed) t.w = Math.max(0, U.round(t.w * 0.9, roundStepFor(ex)));
+  t.deload = true;
+  return t;
+}
+
+/* ---------- milestone badges ---------- */
+const BADGES = [
+  { id: 'w1',    icon: '🌱', name: 'First workout',      test: s => s.workouts >= 1,   goal: s => `${s.workouts}/1` },
+  { id: 'w10',   icon: '🔟', name: '10 workouts',        test: s => s.workouts >= 10,  goal: s => `${s.workouts}/10` },
+  { id: 'w25',   icon: '🥉', name: '25 workouts',        test: s => s.workouts >= 25,  goal: s => `${s.workouts}/25` },
+  { id: 'w50',   icon: '🥈', name: '50 workouts',        test: s => s.workouts >= 50,  goal: s => `${s.workouts}/50` },
+  { id: 'w100',  icon: '🥇', name: '100 workouts',       test: s => s.workouts >= 100, goal: s => `${s.workouts}/100` },
+  { id: 'v10k',  icon: '🐘', name: '10,000kg club',      test: s => s.volume >= 10000,  goal: s => `${U.compact(s.volume)}/10K kg` },
+  { id: 'v50k',  icon: '🚛', name: '50,000kg club',      test: s => s.volume >= 50000,  goal: s => `${U.compact(s.volume)}/50K kg` },
+  { id: 'v100k', icon: '🚀', name: '100,000kg club',     test: s => s.volume >= 100000, goal: s => `${U.compact(s.volume)}/100K kg` },
+  { id: 'pb5',   icon: '⭐', name: '5 personal bests',   test: s => s.prs >= 5,   goal: s => `${s.prs}/5` },
+  { id: 'pb25',  icon: '🌟', name: '25 personal bests',  test: s => s.prs >= 25,  goal: s => `${s.prs}/25` },
+  { id: 'st4',   icon: '🔥', name: '4-week streak',      test: s => s.streak >= 4,  goal: s => `${s.streak}/4 wks` },
+  { id: 'st8',   icon: '🌋', name: '8-week streak',      test: s => s.streak >= 8,  goal: s => `${s.streak}/8 wks` },
+  { id: 'sp10',  icon: '🏃', name: '10 sport sessions',  test: s => s.sport >= 10, goal: s => `${s.sport}/10` },
+  { id: 'ex15',  icon: '🗺️', name: '15 different moves', test: s => s.distinctEx >= 15, goal: s => `${s.distinctEx}/15` },
+  { id: 'own1',  icon: '🛠️', name: 'Built your own',     test: s => s.customs >= 1, goal: s => `${s.customs}/1` },
+];
+function badgeStats(prof) {
+  const logs = prof.logs || [];
+  const volume = logs.reduce((t, l) => t + l.entries.reduce((v, e) => v + e.sets.reduce((x, s) => x + (s.w || 0) * ((EX_BY_ID[e.exId] || {}).timed ? 0 : s.reps), 0), 0), 0);
+  const distinct = new Set(); logs.forEach(l => l.entries.forEach(e => distinct.add(e.exId)));
+  return {
+    workouts: logs.length, volume: Math.round(volume), prs: Object.keys(prof.prs || {}).length,
+    streak: trainingWeeks(prof), sport: (prof.sportLogs || []).length,
+    distinctEx: distinct.size, customs: (prof.customWorkouts || []).length,
+  };
+}
+function newBadges(prof) { // returns freshly earned badges & records them
+  prof.badges = prof.badges || {};
+  const s = badgeStats(prof);
+  const fresh = [];
+  for (const b of BADGES) {
+    if (!prof.badges[b.id] && b.test(s)) { prof.badges[b.id] = U.todayISO(); fresh.push(b); }
+  }
+  return fresh;
+}
+
+/* ---------- weekly recap data ---------- */
+function recapData(prof) { // last complete week (Mon–Sun before this week)
+  const thisMon = U.weekKey(U.todayISO());
+  const lastMon = (() => { const d = U.parseISO(thisMon); d.setDate(d.getDate() - 7); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })();
+  const inWeek = (arr, key) => arr.filter(x => x[key] >= lastMon && x[key] < thisMon);
+  const lifts = inWeek(prof.logs || [], 'date');
+  const sport = inWeek(prof.sportLogs || [], 'date');
+  const vol = lifts.reduce((t, l) => t + l.entries.reduce((v, e) => v + e.sets.reduce((x, s) => x + (s.w || 0) * ((EX_BY_ID[e.exId] || {}).timed ? 0 : s.reps), 0), 0), 0);
+  const pbs = Object.entries(prof.prs || {}).filter(([, p]) => p.date >= lastMon && p.date < thisMon)
+    .map(([exId, p]) => ({ name: (EX_BY_ID[exId] || {}).name || exId, w: p.w }));
+  const sets = lifts.reduce((t, l) => t + l.entries.reduce((v, e) => v + e.sets.length, 0), 0);
+  return { from: lastMon, lifts: lifts.length, sport: sport.length, vol: Math.round(vol), sets, pbs, hasAny: lifts.length + sport.length > 0 };
+}
+
+if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
+  exPref, setExPref, lastPerformance, plateBreakdown, warmupFor, trimSession, estMinutesFor,
+  deloadActive, startDeloadWeek, applyDeload, BADGES, badgeStats, newBadges, recapData,
 });
 
 
@@ -2747,7 +2947,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '2.0.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -2822,34 +3022,41 @@ function nextPlanDay(prof) {
 }
 
 /* ---- workout lifecycle ---- */
-function startWorkout(prof, dayIdx) {
-  const day = prof.plan.days[dayIdx];
-  const entries = day.exercises.map(pe => {
-    const t = nextTargets(prof, pe);
+function buildEntries(prof, exercises) {
+  const easy = deloadActive(prof);
+  return exercises.map(pe => {
+    let t = nextTargets(prof, pe);
+    if (easy) t = applyDeload(prof, pe, Object.assign({ sets: pe.sets }, t));
+    const nSets = easy && t.sets ? t.sets : pe.sets;
     const sets = [];
-    for (let i = 0; i < pe.sets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
+    for (let i = 0; i < nSets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
     return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew };
   });
+}
+function startWorkout(prof, dayIdx, trimMin) {
+  const day = prof.plan.days[dayIdx];
+  let exs = day.exercises, trimmed = null;
+  if (trimMin) { const t = trimSession(day.exercises, trimMin); exs = t.exercises; trimmed = t; }
+  const entries = buildEntries(prof, exs);
+  if (entries.length) entries[0].warmup = warmupFor(prof, entries[0]);
   App.workout = {
     id: U.uid(), date: U.todayISO(), startTs: Date.now(), dayIdx, dayName: day.name,
-    entries, curIdx: 0,
+    entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
   };
   prof.activeWorkout = App.workout;
   saveApp();
 }
 
-function startCustomWorkout(prof, cwId) {
+function startCustomWorkout(prof, cwId, trimMin) {
   const cw = (prof.customWorkouts || []).find(c => c.id === cwId);
   if (!cw) return;
-  const entries = cw.exercises.map(pe => {
-    const t = nextTargets(prof, pe);
-    const sets = [];
-    for (let i = 0; i < pe.sets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
-    return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew };
-  });
+  let exs = cw.exercises, trimmed = null;
+  if (trimMin) { const t = trimSession(cw.exercises, trimMin); exs = t.exercises; trimmed = t; }
+  const entries = buildEntries(prof, exs);
+  if (entries.length) entries[0].warmup = warmupFor(prof, entries[0]);
   App.workout = {
     id: U.uid(), date: U.todayISO(), startTs: Date.now(), dayIdx: null, customId: cwId,
-    dayName: cw.name, entries, curIdx: 0,
+    dayName: cw.name, entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
   };
   prof.activeWorkout = App.workout;
   saveApp();
@@ -2868,13 +3075,15 @@ function finishWorkout(prof) {
       .filter(e => e.sets.length),
   };
   const prs = detectPRs(prof, log);
-  const msgs = applyProgression(prof, log);
+  const easy = deloadActive(prof, log.date);
+  const msgs = easy ? [{ kind: 'hold', text: 'Easy week banked — everything picks up where it left off next week. 🧘' }] : applyProgression(prof, log);
   prof.logs.push(log);
+  const badges = newBadges(prof);
   if (w.dayIdx != null && prof.plan) prof.plan.nextDayIdx = ((w.dayIdx + 1) % prof.plan.days.length);
   prof.activeWorkout = null;
   App.workout = null;
   saveApp();
-  return { log, prs, msgs };
+  return { log, prs, msgs, badges };
 }
 
 function workoutStats(w) {
@@ -2914,6 +3123,12 @@ function importBackup(file, cb) {
 'use strict';
 
 const $app = () => document.getElementById('app');
+const WakeLock = {
+  s: null,
+  async on() { try { this.s = await navigator.wakeLock.request('screen'); } catch (e) { } },
+  off() { try { this.s && this.s.release(); } catch (e) { } this.s = null; },
+};
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && App.workout) WakeLock.on(); });
 let _players = [];   // live animation players to dispose on re-render
 let _elapsedIv = null;
 
@@ -3225,6 +3440,7 @@ function renderToday(prof) {
           : `<button class="btn onhero" style="flex:1" data-a="start-workout" data-idx="${w4d.idx}">Start workout 💥</button>`}
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="choose-day">Switch</button>
       </div>
+      <button class="trim-link" data-a="trim-open" data-mode="${w4d.type}" data-idx="${w4d.idx != null ? w4d.idx : ''}" data-id="${w4d.id || ''}">⚡ Short on time today?</button>
     </div>`;
   } else if (act === 'lift' && liftedToday) {
     hero = `<div class="card hero">
@@ -3271,7 +3487,7 @@ function renderToday(prof) {
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
       ${lastLog ? `<div class="muted mt8">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</div>` : ''}
     </div>
-    ${tips.slice(0, 2).map(t => `<div class="card coach-card"><div class="ic">${t.icon}</div><div><div class="tt">${U.esc(t.title)}</div><div class="tx">${U.esc(t.text)}</div></div></div>`).join('')}
+    ${tips.slice(0, 2).map(t => `<div class="card coach-card"><div class="ic">${t.icon}</div><div><div class="tt">${U.esc(t.title)}</div><div class="tx">${U.esc(t.text)}</div>${t.kind === 'deload' ? '<button class="btn sm ghost mt8" data-a="deload-start">🧘 Make this an easy week</button>' : ''}</div></div>`).join('')}
   </div>`;
 }
 
@@ -3285,7 +3501,7 @@ function renderWorkout(prof) {
   return `<div class="screen">
     <div class="wo-topbar">
       <button class="iconbtn" data-a="wo-exit">✕</button>
-      <div style="text-align:center"><div class="t">${U.esc(w.dayName)}</div><div class="elapsed" id="wo-elapsed">0:00</div></div>
+      <div style="text-align:center"><div class="t">${U.esc(w.dayName)}</div><div class="elapsed" id="wo-elapsed">0:00${w.easy ? ' · 🧘 easy week' : ''}${w.trimmed ? ' · ⚡ ~' + w.trimmed + ' min' : ''}</div></div>
       <button class="btn sm dark" data-a="wo-finish">Finish</button>
     </div>
     <div class="ob-progress" style="margin:2px 0 14px"><i style="width:${totalSets ? doneSets / totalSets * 100 : 0}%"></i></div>
@@ -3305,19 +3521,32 @@ function renderWorkoutEx(prof, e, ei) {
   const tgt = ex.timed ? `${plan.sets} × ${plan.repsMin}–${plan.repsMax}s hold` :
     `${plan.sets} sets × ${plan.repsMin}–${plan.repsMax} reps${ex.unilateral ? ' each side' : ''}`;
   const hint = e.isNew && !ex.bw ? `<div class="wo-target" style="color:#C2400C">First time — pick a weight that leaves ~2 reps in the tank 💡</div>` : '';
+  const lastP = lastPerformance(prof, ex.id);
+  const lastLine = lastP ? `<div class="wo-last">Last time: ${U.esc(lastP.str)} · ${U.fmtDateShort(lastP.date)}</div>` : '';
+  const topW = Math.max(...e.sets.map(x => x.w || 0), 0);
+  const plates = ex.equip.includes('barbell') && !ex.bw && topW > (prof.barKg || 20) ? plateBreakdown(topW, prof.barKg || 20) : null;
+  const plateLine = plates ? `<div class="wo-plates">🏋️ ${prof.barKg || 20}kg bar + <b>${plates.perSide}</b>/side (${plates.plates.join(' + ')})${plates.exact ? '' : ' ≈'}</div>` : '';
+  const ssBadge = plan.ssWithNext ? `<span class="tag" style="background:#F1EDFF;color:#6B3FD9">🔗 superset with next</span>` : '';
+  const warmupRows = (e.warmup || []).map((ws, wi) => `
+      <div class="setrow warmrow">
+        <div class="sn">W</div>
+        <div class="step warmcell"><div class="v"><span>${U.fmtW(ws.w, u)}</span><small>${U.unitLabel(u).toUpperCase()}</small></div></div>
+        <div class="step warmcell"><div class="v"><span>${ws.reps}</span><small>REPS</small></div></div>
+        <button class="donebtn ${ws.done ? 'on' : ''}" data-a="wo-warm-done" data-ei="${ei}" data-wi="${wi}">✓</button>
+      </div>`).join('');
   return `<div class="wo-ex ${active ? 'active' : ''} ${complete ? 'done-ex' : ''}" data-ei="${ei}">
     <div class="wo-ex-head">
-      <div style="flex:1"><div class="nm">${U.esc(ex.name)}</div><div class="wo-target">${tgt}</div>${hint}</div>
+      <div style="flex:1"><div class="nm">${U.esc(ex.name)} ${ssBadge}</div><div class="wo-target">${tgt}</div>${lastLine}${plateLine}${hint}</div>
       <button class="iconbtn" data-a="wo-how" data-ex="${ex.id}" title="How to">🎬</button>
       <button class="iconbtn" data-a="wo-swap" data-ei="${ei}" title="Swap">🔁</button>
     </div>
-    <div class="sets">
+    <div class="sets">${warmupRows}
       ${e.sets.map((s, si) => `
       <div class="setrow">
         <div class="sn">${si + 1}</div>
         ${ex.bw && !ex.timed && !(s.w > 0) ?
           `<div class="step"><button data-a="wo-mkweighted" data-ei="${ei}" data-si="${si}">+</button><div class="v">BW<small>BODY</small></div><span></span></div>` :
-          ex.timed ? `<div class="step" style="visibility:hidden"></div>` :
+          ex.timed ? `<button class="step holdgo" data-a="wo-hold" data-ei="${ei}" data-si="${si}"><span id="hold-${ei}-${si}">▶ ${s.reps}s hold</span></button>` :
           `<div class="step">
             <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="w" data-d="-1">−</button>
             <div class="v tappable" data-a="wo-typein" data-ei="${ei}" data-si="${si}" data-f="w" title="Tap to type"><span>${s.w > 0 ? U.fmtW(s.w, u) : '—'}</span><small>${U.unitLabel(u).toUpperCase()}</small></div>
@@ -3396,8 +3625,8 @@ function stepSize(ex, units) {
 
 function workoutAction(a, el, prof) {
   const w = App.workout;
-  if (a === 'start-workout') { Sound.unlock(); startWorkout(prof, +el.dataset.idx); render(); return; }
-  if (a === 'wo-exit') { showConfirm('Leave this workout?', 'Your logged sets are kept — you can pick it back up from Today.', 'Keep training', 'Leave', ok => { if (!ok) { App.view = 'today'; App.workout = null; stopRest(); render(); } }); return; }
+  if (a === 'start-workout') { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); return; }
+  if (a === 'wo-exit') { showConfirm('Leave this workout?', 'Your logged sets are kept — you can pick it back up from Today.', 'Keep training', 'Leave', ok => { if (!ok) { App.view = 'today'; App.workout = null; stopRest(); WakeLock.off(); render(); } }); return; }
   if (a === 'wo-discard') { discardWorkout(prof); stopRest(); render(); return; }
   if (a === 'wo-step') {
     const e = w.entries[+el.dataset.ei], s = e.sets[+el.dataset.si];
@@ -3449,15 +3678,48 @@ function workoutAction(a, el, prof) {
     s.done = !s.done;
     if (s.done) {
       const ex = EX_BY_ID[e.exId];
-      // copy weight forward to next un-done set for convenience
       const nxt = e.sets[si + 1];
       if (nxt && !nxt.done && !ex.timed) { nxt.w = s.w; }
       const allDone = e.sets.every(x => x.done);
       if (allDone && App.workout.curIdx === ei) App.workout.curIdx = Math.min(ei + 1, w.entries.length - 1);
-      if (!(allDone && ei === w.entries.length - 1)) startRest(e.plan.rest || 60);
+      const firstOfPair = e.plan && e.plan.ssWithNext && w.entries[ei + 1];
+      if (firstOfPair && !allDone || firstOfPair && allDone) {
+        stopRest();
+        toast(`🔗 Straight into ${EX_BY_ID[w.entries[ei + 1].exId].name} — rest after`);
+      } else if (!(allDone && ei === w.entries.length - 1)) startRest(e.plan.rest || 60);
       else stopRest();
     }
     prof.activeWorkout = w; saveApp(); render();
+    return;
+  }
+  if (a === 'wo-warm-done') {
+    const e = w.entries[+el.dataset.ei];
+    const ws = e.warmup[+el.dataset.wi];
+    ws.done = !ws.done;
+    prof.activeWorkout = w; saveApp(); render();
+    return;
+  }
+  if (a === 'wo-hold') {
+    const ei = +el.dataset.ei, si = +el.dataset.si;
+    const e = w.entries[ei], s = e.sets[si];
+    if (App.holdTimer) { clearInterval(App.holdTimer.iv); App.holdTimer = null; render(); return; }
+    Sound.unlock();
+    let left = s.reps;
+    const span = document.getElementById(`hold-${ei}-${si}`);
+    App.holdTimer = { iv: setInterval(() => {
+      left -= 1;
+      if (span) span.textContent = left > 0 ? `⏳ ${left}s…` : 'done!';
+      if (left === 3 || left === 2 || left === 1) Sound.tick();
+      if (left <= 0) {
+        clearInterval(App.holdTimer.iv); App.holdTimer = null;
+        Sound.timerDone();
+        s.done = true;
+        prof.activeWorkout = w; saveApp(); render();
+        const allDone = e.sets.every(x => x.done);
+        if (!(allDone && ei === w.entries.length - 1)) startRest(e.plan.rest || 45);
+      }
+    }, 1000) };
+    if (span) span.textContent = `⏳ ${left}s…`;
     return;
   }
   if (a === 'wo-feel') { w.entries[+el.dataset.ei].feel = el.dataset.v; prof.activeWorkout = w; saveApp(); render(); return; }
@@ -3471,7 +3733,7 @@ function workoutAction(a, el, prof) {
     if (!stats.sets) { showConfirm('Nothing logged yet', 'Tick off at least one set, or leave the workout.', 'Keep training', 'Leave workout', ok => { if (!ok) { discardWorkout(prof); stopRest(); render(); } }); return; }
     const unfinished = w.entries.some(e => e.sets.some(s => !s.done));
     const doFinish = () => {
-      stopRest();
+      stopRest(); WakeLock.off();
       const res = finishWorkout(prof);
       App.view = 'today';
       render();
@@ -3576,6 +3838,11 @@ function showExerciseSheet(exId, prof) {
       ${MuscleMap.svg(ex.m.p, ex.m.s)}
       <div class="mm-key"><span><i style="background:#FF4D3D"></i>Primary</span><span><i style="background:#FFC069"></i>Assisting</span></div>
     </div>
+    ${prof ? `<div class="prefrow mt16">
+      <button class="prefbtn ${exPref(prof, exId) === 'fav' ? 'on-fav' : ''}" data-a="pref-fav" data-ex="${exId}">${exPref(prof, exId) === 'fav' ? '♥' : '♡'} Favourite</button>
+      <button class="prefbtn ${exPref(prof, exId) === 'ban' ? 'on-ban' : ''}" data-a="pref-ban" data-ex="${exId}">🚫 Not for me</button>
+    </div>
+    <div class="muted" style="font-size:11.5px;text-align:center;margin-top:6px">Favourites show up more in your plans · “not for me” keeps it out</div>` : ''}
     <button class="btn ghost block mt16" data-a="sheet-close">Close</button>`);
   let animStarted = false;
   const startAnim = () => {
@@ -3708,6 +3975,7 @@ function showSummary(prof, res) {
       <div class="s"><div class="v">${res.log.entries.length}</div><div class="l">exercises</div></div>
     </div>
     ${res.prs.map(pr => `<div class="pr-banner">🏆 New PR — ${U.esc(EX_BY_ID[pr.exId].name)}: ${U.fmtW(pr.val, prof.units)}${pr.kind === 'weight' ? U.unitLabel(prof.units) : U.unitLabel(prof.units) + ' est. 1RM'}</div>`).join('')}
+    ${(res.badges || []).map(b => `<div class="pr-banner badgeb">${b.icon} Milestone unlocked — ${U.esc(b.name)}!</div>`).join('')}
     ${res.msgs.length ? `<div class="card mt12" style="box-shadow:none;border:1.5px solid var(--line)">
       <div class="kicker" style="margin-bottom:6px">Next time</div>
       ${res.msgs.slice(0, 6).map(m => `<div class="prog-msg"><span class="k">${m.kind === 'up' ? '📈' : m.kind === 'deload' ? '🛟' : '🎯'}</span>${U.esc(m.text)}</div>`).join('')}
@@ -3904,6 +4172,10 @@ function renderProgress(prof) {
         <span class="muted" style="margin-left:6px">${U.fmtDateShort(pr.date)}</span>
         <span class="w">${U.fmtW(pr.w, prof.units)}${U.unitLabel(prof.units)}</span></div>`).join('')}
     </div></div>` : ''}
+    ${shareCardHtml(prof)}
+    ${badgesCardHtml(prof)}
+    ${heatmapCardHtml(prof)}
+    ${bodyCardHtml(prof)}
     <div class="card"><h3>Coach’s corner</h3><div class="mt12">
       ${tips.map(t => `<div class="coach-card" style="margin-bottom:13px"><div class="ic">${t.icon}</div><div><div class="tt">${U.esc(t.title)}</div><div class="tx">${U.esc(t.text)}</div></div></div>`).join('')}
     </div></div>
@@ -3967,17 +4239,19 @@ function dispatch(e) {
   const prof = activeProfile();
   // onboarding
   if (a.startsWith('ob-') || a === 'wb-set') return obAction(a, el);
+  // v2: trimmer, deload, badges/share, body log, exercise prefs
+  if (prof && v2Action(a, el, prof)) return;
   // sheets
   if (a === 'sheet-close') return closeSheet();
   if (a === 'tab') { App.view = el.dataset.id; closeSheet(); window.scrollTo(0, 0); render(); return; }
   if (a === 'ex-open') { App._vidChoice = null; closeSheet(); showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'vid-pick') { App._vidChoice = { exId: el.dataset.ex, i: +el.dataset.i }; showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'choose-day') { showChooseDaySheet(prof); return; }
-  if (a === 'start-workout') { closeSheet(); Sound.unlock(); startWorkout(prof, +el.dataset.idx); render(); return; }
+  if (a === 'start-workout') { closeSheet(); Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); return; }
   // custom workout actions
   if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
-  if (['wo-exit', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
+  if (['wo-exit', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
   if (a === 'do-swap') {
     const ei = +el.dataset.ei;
@@ -4138,6 +4412,7 @@ function showBuilderSheet(prof) {
         <div class="cwx-ctl"><span class="lb">${pe.timed ? 'Secs' : 'Reps'}</span>
           <button data-a="cw-step" data-i="${i}" data-f="repsMin" data-d="-1">−</button><b>${pe.repsMin}–${pe.repsMax}</b><button data-a="cw-step" data-i="${i}" data-f="repsMax" data-d="1">+</button></div>
         <button class="cwx-ctl cwx-rest" data-a="cw-rest" data-i="${i}"><span class="lb">Rest</span><b>${U.fmtDur(pe.rest)}</b></button>
+        ${i < d.exercises.length - 1 ? `<button class="cwx-ctl cwx-link ${pe.ssWithNext ? 'on' : ''}" data-a="cw-link" data-i="${i}"><span class="lb">Pair</span><b>${pe.ssWithNext ? '🔗 superset' : '+ superset'}</b></button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -4257,9 +4532,15 @@ function customAction(a, el, prof) {
     pe.rest = REST_STEPS[(cur + 1 + REST_STEPS.length) % REST_STEPS.length] || 60;
     showBuilderSheet(prof); return;
   }
+  if (a === 'cw-link') { // superset with the next exercise
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    pe.ssWithNext = !pe.ssWithNext;
+    showBuilderSheet(prof); return;
+  }
   if (a === 'cw-save') {
     const d = App.cwDraft;
     if (!d.exercises.length) return toast('Add at least one exercise 💪');
+    delete d.exercises[d.exercises.length - 1].ssWithNext; // last move can't pair forward
     const name = (d.name || '').trim() || 'My Workout';
     if (d.planIdx != null) { // overwrite a generated plan day in place
       const day = prof.plan.days[d.planIdx];
@@ -4322,10 +4603,198 @@ function customAction(a, el, prof) {
     return;
   }
   if (a === 'start-custom') {
-    closeSheet(); Sound.unlock();
+    closeSheet(); Sound.unlock(); WakeLock.on();
     startCustomWorkout(prof, el.dataset.id);
     render(); return;
   }
+}
+
+
+/* ============ LiftOff v2.0 — motivation UI, trimmer, deload, prefs (UI layer) ============ */
+'use strict';
+
+/* ---------- session trimmer ---------- */
+function showTrimSheet(prof, mode, idx, id) {
+  const exs = mode === 'custom' ? (customById(prof, id) || {}).exercises : prof.plan.days[idx].exercises;
+  if (!exs) return;
+  const full = estMinutesFor(exs);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">⚡ How long have you got?</h3>
+    <p class="muted mt8" style="margin-bottom:12px">Full session is ~${full} min. Pick your time and I’ll keep the moves that matter most — every set still counts.</p>
+    <div class="chips">
+      ${[15, 20, 25, 30, 40].filter(m => m < full).map(m => {
+        const t = trimSession(exs, m);
+        return `<button class="chip" data-a="trim-start" data-mode="${mode}" data-idx="${idx != null ? idx : ''}" data-id="${id || ''}" data-min="${m}">${m} min · ${t.exercises.length} moves</button>`;
+      }).join('') || '<p class="muted">This session is already nice and short!</p>'}
+    </div>`);
+}
+
+/* ---------- badges ---------- */
+function badgesCardHtml(prof) {
+  const stats = badgeStats(prof);
+  prof.badges = prof.badges || {};
+  const cells = BADGES.map(b => {
+    const got = !!prof.badges[b.id];
+    return `<div class="badge ${got ? 'got' : ''}">
+      <div class="bi">${b.icon}</div>
+      <div class="bn">${U.esc(b.name)}</div>
+      <div class="bp">${got ? U.fmtDateShort(prof.badges[b.id]) : U.esc(b.goal(stats))}</div>
+    </div>`;
+  }).join('');
+  const earned = Object.keys(prof.badges).length;
+  return `<div class="card"><div class="row"><h3>Milestones</h3><span class="spacer"></span><span class="muted">${earned}/${BADGES.length} earned</span></div>
+    <div class="badges mt12">${cells}</div></div>`;
+}
+
+/* ---------- activity heatmap (last 12 weeks) ---------- */
+function heatmapCardHtml(prof) {
+  const todayISO = U.todayISO();
+  const mon0 = U.parseISO(U.weekKey(todayISO)); // this week's Monday
+  const liftDates = new Set((prof.logs || []).map(l => l.date));
+  const sportDates = new Set((prof.sportLogs || []).map(s => s.date));
+  let cols = '';
+  for (let wk = 11; wk >= 0; wk--) {
+    let col = '';
+    for (let d = 0; d < 7; d++) {
+      const dt = new Date(mon0); dt.setDate(mon0.getDate() - wk * 7 + d);
+      const iso = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+      const future = iso > todayISO;
+      const l = liftDates.has(iso), sp = sportDates.has(iso);
+      const cls = future ? 'fut' : l && sp ? 'both' : l ? 'lift' : sp ? 'sport' : '';
+      col += `<i class="${cls}" title="${iso}"></i>`;
+    }
+    cols += `<div class="hm-col">${col}</div>`;
+  }
+  return `<div class="card"><h3>Last 12 weeks</h3>
+    <div class="hm mt12">${cols}</div>
+    <div class="hm-key mt8"><span><i class="lift"></i>Lift</span><span><i class="sport"></i>Sport</span><span><i class="both"></i>Both</span></div>
+  </div>`;
+}
+
+/* ---------- bodyweight tracking ---------- */
+function bodyCardHtml(prof) {
+  const logs = prof.bodyLogs || [];
+  const last = logs[logs.length - 1];
+  const chart = logs.length >= 2
+    ? Charts.line([{ label: 'Bodyweight', pts: logs.slice(-16).map(b => ({ x: U.fmtDateShort(b.date), y: prof.units === 'lb' ? Math.round(b.w * 2.20462 * 10) / 10 : b.w })) }], { h: 150 })
+    : `<p class="muted mt8">Optional — log it whenever you fancy. The trend is what matters; daily wiggles are just water and life.</p>`;
+  return `<div class="card"><div class="row"><h3>Body</h3><span class="spacer"></span>${last ? `<span class="muted">last: ${U.fmtW(last.w, prof.units)}${U.unitLabel(prof.units)} · ${U.fmtDateShort(last.date)}</span>` : ''}</div>
+    ${chart}
+    <div class="row mt12">
+      <input class="ob-input" id="body-w" type="text" inputmode="decimal" placeholder="Today’s weight (${U.unitLabel(prof.units)})" style="flex:1;padding:11px 13px;font-size:14.5px">
+      <button class="btn sm dark" data-a="body-log">Log</button>
+    </div>
+  </div>`;
+}
+
+/* ---------- weekly recap share card ---------- */
+async function shareRecap(prof) {
+  const r = recapData(prof);
+  const cv = document.createElement('canvas');
+  cv.width = 1080; cv.height = 1350;
+  const g = cv.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 1080, 1350);
+  grad.addColorStop(0, '#FF4D3D'); grad.addColorStop(0.55, '#FF7A1A'); grad.addColorStop(1, '#FF9F1C');
+  g.fillStyle = grad; g.fillRect(0, 0, 1080, 1350);
+  g.fillStyle = 'rgba(255,255,255,0.13)';
+  g.beginPath(); g.arc(950, 120, 190, 0, 7); g.fill();
+  g.beginPath(); g.arc(80, 1240, 150, 0, 7); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center';
+  g.font = '800 44px system-ui, sans-serif';
+  g.fillText('🚀 LIFTOFF · MY WEEK', 540, 130);
+  g.font = '900 92px system-ui, sans-serif';
+  g.fillText(prof.name + ' ' + prof.emoji, 540, 260);
+  g.font = '600 36px system-ui, sans-serif';
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.fillText('week of ' + U.fmtDateShort(r.from), 540, 320);
+  // white stat card
+  const rr = (x, y, w2, h, rad) => { g.beginPath(); g.roundRect(x, y, w2, h, rad); g.fill(); };
+  g.fillStyle = 'rgba(255,255,255,0.96)'; rr(70, 380, 940, 420, 40);
+  g.fillStyle = '#191C26';
+  const stat = (x, big, small) => {
+    g.font = '900 110px system-ui, sans-serif'; g.fillText(big, x, 560);
+    g.font = '700 34px system-ui, sans-serif'; g.fillStyle = '#565B6B'; g.fillText(small, x, 620); g.fillStyle = '#191C26';
+  };
+  stat(250, String(r.lifts), 'lifts');
+  stat(540, String(r.sport), 'sport days');
+  stat(820, U.compact(r.vol), 'kg lifted');
+  g.font = '700 40px system-ui, sans-serif'; g.fillStyle = '#565B6B';
+  g.fillText(`${r.sets} sets banked 💪`, 540, 730);
+  // PBs
+  g.fillStyle = 'rgba(255,255,255,0.96)'; rr(70, 840, 940, 330, 40);
+  g.fillStyle = '#191C26'; g.font = '800 44px system-ui, sans-serif';
+  g.fillText(r.pbs.length ? '🏆 New personal bests' : '✨ Progress in the bank', 540, 920);
+  g.font = '600 40px system-ui, sans-serif'; g.fillStyle = '#565B6B';
+  if (r.pbs.length) r.pbs.slice(0, 3).forEach((p, i) => g.fillText(`${p.name} — ${p.w}kg`, 540, 990 + i * 58));
+  else g.fillText('Every session logged is strength saved.', 540, 1000);
+  g.fillStyle = 'rgba(255,255,255,0.95)'; g.font = '700 34px system-ui, sans-serif';
+  g.fillText('made with LiftOff — my pocket personal trainer', 540, 1280);
+  const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+  const file = new File([blob], 'liftoff-week.png', { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'My LiftOff week' }); return; } catch (e) { /* cancelled */ }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'liftoff-week.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('Recap image saved — share away! 📸');
+}
+
+function shareCardHtml(prof) {
+  const r = recapData(prof);
+  return `<div class="card" style="background:var(--grad-violet);color:#fff">
+    <h3 style="color:#fff">📸 Share your week</h3>
+    <p class="mt8" style="font-size:13.5px;opacity:.95;line-height:1.5">${r.hasAny ? `Last week: ${r.lifts} ${U.plural(r.lifts, 'lift')}, ${r.sport} sport ${U.plural(r.sport, 'day')}, ${U.compact(r.vol)}kg${r.pbs.length ? `, ${r.pbs.length} PB${r.pbs.length > 1 ? 's' : ''} 🏆` : ''}. Make it a brag-worthy picture.` : 'Once you’ve logged a week, turn it into a shareable brag-card.'}</p>
+    ${r.hasAny ? '<button class="btn onhero sm mt8" style="color:#6B3FD9" data-a="share-week">Create share image</button>' : ''}
+  </div>`;
+}
+
+/* ---------- v2 dispatch ---------- */
+function v2Action(a, el, prof) {
+  if (a === 'trim-open') {
+    showTrimSheet(prof, el.dataset.mode, el.dataset.idx !== '' ? +el.dataset.idx : null, el.dataset.id || null);
+    return true;
+  }
+  if (a === 'trim-start') {
+    const min = +el.dataset.min;
+    closeSheet(); Sound.unlock(); WakeLock.on();
+    if (el.dataset.mode === 'custom') startCustomWorkout(prof, el.dataset.id, min);
+    else startWorkout(prof, +el.dataset.idx, min);
+    render();
+    toast(`⚡ Trimmed to ~${min} min — every set still counts`);
+    return true;
+  }
+  if (a === 'deload-start') {
+    startDeloadWeek(prof); saveApp(); render();
+    toast('🧘 Easy week on — lighter weights, fewer sets, full credit');
+    return true;
+  }
+  if (a === 'share-week') { shareRecap(prof); return true; }
+  if (a === 'body-log') {
+    const inp = document.getElementById('body-w');
+    const num = parseFloat((inp.value || '').replace(',', '.'));
+    if (isNaN(num) || num <= 20 || num > 400) { toast('Pop a number in first 🙂'); return true; }
+    const kg = Math.round(U.toKg(num, prof.units) * 10) / 10;
+    prof.bodyLogs = prof.bodyLogs || [];
+    const today = U.todayISO();
+    const ex = prof.bodyLogs.find(b => b.date === today);
+    if (ex) ex.w = kg; else prof.bodyLogs.push({ date: today, w: kg });
+    saveApp(); render();
+    toast('Logged 📏 — trend over wiggles, always');
+    return true;
+  }
+  if (a === 'pref-fav' || a === 'pref-ban') {
+    const exId = el.dataset.ex;
+    const cur = exPref(prof, exId);
+    const want = a === 'pref-fav' ? 'fav' : 'ban';
+    setExPref(prof, exId, cur === want ? null : want);
+    saveApp();
+    App._vidChoice = null;
+    showExerciseSheet(exId, prof);
+    toast(exPref(prof, exId) === 'fav' ? '♥ Favourited — you’ll see it more' :
+      exPref(prof, exId) === 'ban' ? '🚫 Noted — the plan will avoid it' : 'Preference cleared');
+    return true;
+  }
+  return false;
 }
 
 
@@ -4367,6 +4836,12 @@ loadApp();
 render();
 if (App.justUpdated) setTimeout(() => toast('LiftOff updated to v' + APP_VERSION + ' — all your data came along ✨', 3200), 600);
 
+</script>
+<script>
+// PWA: offline shell + home-screen install (https only; harmless to skip elsewhere)
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 </script>
 </body>
 </html>

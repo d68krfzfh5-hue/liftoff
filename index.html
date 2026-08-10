@@ -430,6 +430,9 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .cwx-note { width: 100%; margin-top: 7px; border: 1.5px solid var(--line); border-radius: 10px;
   padding: 8px 11px; font-size: 12.5px; font-family: inherit; background: #FBF9FF; }
 .cwx-note:focus { outline: none; border-color: #B9A5F0; }
+.switchback { display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  color: var(--ink3); font-weight: 800; font-size: 12.5px; padding: 0 0 10px; }
+.switchback:active { opacity: 0.6; }
 
 </style>
 </head>
@@ -3224,7 +3227,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.1.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3450,12 +3453,15 @@ function render() {
   else if (App.view === 'library') html = renderLibrary(prof);
   else if (App.view === 'progress') html = prof.isCoach ? renderCoachProgress(prof) : renderProgress(prof);
   else html = renderProfileView(prof);
-  app.innerHTML = html + renderTabs();
+  app.innerHTML = html + renderTabs(prof);
   afterRender(prof);
 }
 
-function renderTabs() {
-  const tabs = [['today', 'Today'], ['plan', 'Plan'], ['library', 'Exercises'], ['progress', 'Progress'], ['profile', 'Profile']];
+function renderTabs(prof) {
+  const coach = prof && prof.isCoach;
+  const tabs = coach
+    ? [['today', 'Coach'], ['plan', 'Their plan'], ['library', 'Exercises'], ['progress', 'Their progress'], ['profile', 'Profile']]
+    : [['today', 'Today'], ['plan', 'Plan'], ['library', 'Exercises'], ['progress', 'Progress'], ['profile', 'Profile']];
   return `<nav class="tabs">
     <svg width="0" height="0"><defs><linearGradient id="tabgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF4D3D"/><stop offset="1" stop-color="#FF9F1C"/></linearGradient></defs></svg>
     ${tabs.map(([id, lbl]) => `<button class="${App.view === id ? 'on' : ''}" data-a="tab" data-id="${id}">${ICONS[id]}${lbl}</button>`).join('')}
@@ -4281,7 +4287,7 @@ function renderPlanView(prof) {
   const wdFor = i => { for (const [wd, idx] of Object.entries(plan.dayMap || {})) if (+idx === i && !(prof.customMap && prof.customMap[wd])) return +wd; return null; };
   const at = ATHLETE_TYPES[prof.quiz.athleteType || 'gym'];
   const weekCard = sched ? `<div class="card">
-      <div class="row"><h3>Your week</h3><span class="spacer"></span><span class="tag">${at.emoji} ${at.label}</span></div>
+      <div class="row"><h3>${prof.isCoach && prof.coachOf ? U.esc(prof.coachOf.athleteName) + '’s week' : 'Your week'}</h3><span class="spacer"></span><span class="tag">${at.emoji} ${at.label}</span></div>
       <div class="mt8">
       ${WEEKDAYS.map((wd, d) => {
         const act = sched[d] || 'rest';
@@ -4296,11 +4302,13 @@ function renderPlanView(prof) {
       }).join('')}
       </div>
     </div>` : '';
+  const coachOf = prof.isCoach && prof.coachOf;
   return `<div class="screen">
-    <div class="hdr"><div><div class="hi">Your plan</div>
-      <div class="sub">${U.esc(plan.splitName)} · ${GOALS[plan.goal].label} ${GOALS[plan.goal].emoji}</div></div>
+    <div class="hdr"><div><div class="hi">${coachOf ? U.esc(coachOf.athleteName) + '’s plan' : 'Your plan'}</div>
+      <div class="sub">${coachOf ? '👟 every save syncs to their phone · ' : ''}${U.esc(plan.splitName)} · ${GOALS[plan.goal].label} ${GOALS[plan.goal].emoji}</div></div>
       <button class="btn sm ghost" data-a="prefs-open">Adjust</button>
     </div>
+    ${coachOf ? `<div class="coach-note" style="margin-bottom:12px">✏️ This is the week ${U.esc(coachOf.athleteName)} sees. Tap any day’s ✏️ to change exercises, sets, reps — and leave notes.</div>` : ''}
     ${weekCard}
     ${plan.days.map((d, i) => `
       <div class="card day-card">
@@ -4484,11 +4492,27 @@ function renderProfileView(prof) {
       <div class="muted">Training since ${U.fmtDateShort(prof.createdAt)} · ${prof.logs.length} ${U.plural(prof.logs.length, 'workout')}</div>
       <button class="btn ghost sm mt12" data-a="prefs-open">Edit goals & preferences</button>
     </div>
+    ${(() => {
+      if (prof.isCoach) return '';
+      const clients = Object.values(App.data.profiles).filter(p => p.isCoach && p.coachOf);
+      if (!clients.length) return '';
+      return `<div class="card"><h3>👟 Your clients</h3>
+        <p class="muted mt8">Tap a name to open their coaching space — build their plan there.</p>
+        <div class="mt8">${clients.map(c => `<button class="prof-row" style="width:100%;text-align:left" data-a="co-open" data-id="${c.id}">
+          <span class="em">👟</span>
+          <span style="flex:1"><div class="nm">${U.esc(c.coachOf.athleteName)}</div>
+          <div class="meta">${c.coachOf.progress ? (w => w + ' ' + U.plural(w, 'workout') + ' logged · ')((c.coachOf.progress.totals || {}).workouts || 0) : ''}${U.esc(syncStatusLine(c.coachOf) || 'not synced yet')}</div></span>
+          <span class="muted" style="font-weight:800">Open →</span>
+        </button>`).join('')}</div>
+        <div class="row mt8"><button class="btn ghost sm" data-a="co-start">+ Coach someone new</button>
+        ${prof.coachSync ? '' : '<button class="btn ghost sm" data-a="co-pair-open">💌 I have a coach code</button>'}</div>
+      </div>`;
+    })()}
     ${prof.isCoach ? '' : prof.coachSync ? `<div class="card"><h3>💌 My coach</h3>
       <p class="muted mt8">Paired with <b>${U.esc(prof.coachSync.coachName || 'your coach')}</b> — they can update your plan, leave you notes and see your training. ${U.esc(syncStatusLine(prof.coachSync))}</p>
       <div class="row mt8"><button class="btn ghost sm" data-a="co-sync-now">Check for updates</button>
       <button class="btn ghost sm" style="color:#C0302C" data-a="co-unpair">Unpair</button></div>
-    </div>` : `<div class="card"><h3>💌 Coaching</h3>
+    </div>` : Object.values(App.data.profiles).some(p => p.isCoach) ? '' : `<div class="card"><h3>💌 Coaching</h3>
       <p class="muted mt8">Got a coach? Enter their code and they'll build your plan and cheer you on. Or flip it — coach someone else from this phone.</p>
       <div class="row mt8"><button class="btn ghost sm" data-a="co-pair-open">I have a coach code</button>
       <button class="btn ghost sm" data-a="co-start">👟 Coach someone</button></div>
@@ -4719,7 +4743,8 @@ function showBuilderSheet(prof) {
     </div>`;
   }).join('');
   showSheet(`
-    <h3 style="font-size:19px;font-weight:900">${d.planIdx != null ? 'Edit this plan day' : d.id ? 'Edit workout' : 'Build a workout'}</h3>
+    <h3 style="font-size:19px;font-weight:900">${(() => { const an = prof.isCoach && prof.coachOf ? prof.coachOf.athleteName : null;
+      return d.planIdx != null ? (an ? `Edit ${U.esc(an)}’s day` : 'Edit this plan day') : d.id ? (an ? `Edit ${U.esc(an)}’s workout` : 'Edit workout') : (an ? `Build ${U.esc(an)}’s workout` : 'Build a workout'); })()}</h3>
     <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? 'Change anything — this overwrites the auto-generated day. Regenerating the plan builds it fresh again.' : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
     <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day 🍑" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
     ${prof.isCoach ? `<textarea class="ob-input" id="cw-daynote" rows="2" maxlength="300" placeholder="📝 Note for the whole day — shows when they start it" style="width:100%;margin-top:8px;resize:vertical;font-size:13.5px">${U.esc(d.note || '')}</textarea>` : ''}
@@ -5140,7 +5165,9 @@ function renderCoachHome(prof) {
     : onLatest ? `${U.esc(co.athleteName)} is on your latest plan ✓`
     : co.pendingPlanPush ? 'Changes ready to send…'
     : `Sent — waiting for ${U.esc(co.athleteName)} to tap Apply`;
+  const myProf = Object.values(App.data.profiles).find(p => !p.isCoach);
   return `<div class="screen">
+    ${myProf ? `<button class="switchback" data-a="co-myprofile">↩ Back to my training (${U.esc(myProf.name)})</button>` : ''}
     <div class="hdr"><div><div class="hi">Coaching ${U.esc(co.athleteName)} 👟</div><div class="sub">${U.esc(status)}</div></div>
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
     <div class="card hero">
@@ -5264,6 +5291,17 @@ function coachMsgCardHtml(prof) {
 /* ---------- dispatch ---------- */
 function coachAction(a, el, prof) {
   if (a === 'co-start') { showCoachCreateSheet(prof); return true; }
+  if (a === 'co-open') {
+    App.data.activeProfileId = el.dataset.id;
+    App.view = 'today'; closeSheet(); saveApp(); render();
+    syncTick(true);
+    return true;
+  }
+  if (a === 'co-myprofile') {
+    const mine = Object.values(App.data.profiles).find(p => !p.isCoach);
+    if (mine) { App.data.activeProfileId = mine.id; App.view = 'today'; saveApp(); render(); }
+    return true;
+  }
   if (a === 'co-create') {
     const athlete = (document.getElementById('co-ath-name').value || '').trim();
     const myName = (document.getElementById('co-my-name').value || '').trim() || prof.name;

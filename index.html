@@ -433,6 +433,19 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .switchback { display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
   color: var(--ink3); font-weight: 800; font-size: 12.5px; padding: 0 0 10px; }
 .switchback:active { opacity: 0.6; }
+/* ============ v2.3 — history editing ============ */
+.hist-sets { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.hist-chip { border: 1.5px solid var(--line); background: var(--surface); border-radius: 999px;
+  padding: 7px 13px; font-weight: 800; font-size: 13px; color: var(--ink); cursor: pointer; }
+.hist-chip:active { background: var(--grad-soft); }
+.hist-editrow { display: inline-flex; align-items: center; gap: 6px; background: var(--grad-soft);
+  border-radius: 999px; padding: 5px 8px; font-weight: 800; }
+.hist-in { width: 56px; border: 1.5px solid rgba(20,22,34,0.15); border-radius: 9px; padding: 6px 8px;
+  font-size: 14px; font-weight: 800; text-align: center; background: #fff; }
+.hist-in:focus { outline: none; border-color: var(--brand); }
+.hist-ok { width: 30px; height: 30px; border: none; border-radius: 50%; background: var(--ink); color: #fff;
+  font-weight: 900; cursor: pointer; }
+.hist-del { width: 30px; height: 30px; border: none; border-radius: 50%; background: none; font-size: 14px; cursor: pointer; }
 
 </style>
 </head>
@@ -786,6 +799,7 @@ const AnimEngine = (() => {
   /* Public: create a player bound to a canvas. */
   function play(canvas, animId, opts) {
     const anim = ANIMS[animId] || ANIMS.squat_bw;
+    if (!canvas) return { stop() { } }; // sheet may already be closed by the time play() runs
     const g = canvas.getContext('2d');
     let raf = null, start = null, disposed = false;
     const scale = () => {
@@ -2315,6 +2329,37 @@ function detectPRs(profile, log) {
   return out;
 }
 
+/* replay all logs → fresh exercise histories + PRs. Progression targets (st.w etc.) are
+   deliberately preserved: fixing a typo in the past shouldn't change next week's prescription. */
+function rebuildDerived(profile) {
+  const logs = (profile.logs || []).slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  for (const st of Object.values(profile.exState || {})) st.history = [];
+  profile.prs = {};
+  for (const log of logs) {
+    for (const entry of log.entries) {
+      const ex = EX_BY_ID[entry.exId]; if (!ex) continue;
+      const done = entry.sets.filter(s => s.done && s.reps > 0);
+      if (!done.length) continue;
+      const st = exState(profile, entry.exId);
+      const topW = Math.max(...done.map(s => s.w || 0));
+      const bestSet = done.reduce((a, s) => e1rm(s.w || 0, s.reps) > e1rm(a.w || 0, a.reps) ? s : a, done[0]);
+      st.history.push({ date: log.date, topW, bestReps: bestSet.reps, e1rm: e1rm(bestSet.w || 0, bestSet.reps), vol: done.reduce((t, s) => t + (s.w || 0) * s.reps, 0) });
+      if (st.history.length > 400) st.history.shift();
+      if (!ex.timed) {
+        const doneW = done.filter(s => (s.w || 0) > 0);
+        if (doneW.length) {
+          const tW = Math.max(...doneW.map(s => s.w));
+          const bE = Math.max(...doneW.map(s => e1rm(s.w, s.reps)));
+          const pr = profile.prs[entry.exId];
+          if (!pr) profile.prs[entry.exId] = { w: tW, e1rm: Math.round(bE * 10) / 10, date: log.date };
+          else if (tW > pr.w || bE > pr.e1rm) profile.prs[entry.exId] = { w: Math.max(tW, pr.w), e1rm: Math.round(Math.max(bE, pr.e1rm) * 10) / 10, date: log.date };
+        }
+      }
+    }
+  }
+  for (const [id, st] of Object.entries(profile.exState || {})) if (!st.history.length && st.w == null) delete profile.exState[id];
+}
+
 /* weekly sets per coarse muscle group from logs in [fromISO, toISO) */
 function weeklySets(profile, fromISO, toISO) {
   const out = {}; MUSCLE_GROUPS.forEach(g => out[g] = 0);
@@ -2961,7 +3006,7 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
   }
   prof.coachName = doc.coach || 'Your coach';
   const newMsg = doc.msg || '';
-  if (newMsg && newMsg !== prof.coachMsg) prof.coachMsgSeen = false;
+  if (newMsg && newMsg !== prof.coachMsg) { prof.coachMsgSeen = false; prof.coachMsgReact = null; }
   prof.coachMsg = newMsg;
   if (prof.coachSync) prof.coachSync.appliedPlanRev = rev;
   return true;
@@ -2989,8 +3034,10 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
     } : null,
     logs: (prof.logs || []).filter(l => l.date >= cut).slice(-45).map(l => ({
       date: l.date, dayName: l.dayName, durationMin: l.durationMin,
+      react: l.react || null, note: l.note ? String(l.note).slice(0, 200) : null,
       entries: (l.entries || []).map(e => ({ exId: e.exId, sets: (e.sets || []).map(s => ({ w: s.w || 0, reps: s.reps || 0 })) })),
     })),
+    msgReact: prof.coachMsgReact || null,
     sportLogs: (prof.sportLogs || []).filter(s => s.date >= cut).slice(-90),
     prs: prof.prs || {},
     exTop,
@@ -3251,7 +3298,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4379,9 +4426,24 @@ function showSummary(prof, res) {
       <div class="kicker" style="margin-bottom:6px">Next time</div>
       ${res.msgs.slice(0, 6).map(m => `<div class="prog-msg"><span class="k">${m.kind === 'up' ? '📈' : m.kind === 'deload' ? '🛟' : '🎯'}</span>${U.esc(m.text)}</div>`).join('')}
     </div>` : ''}
+    ${prof.coachSync ? `<div class="card mt12" style="box-shadow:none;border:1.5px solid var(--line)">
+      <div class="kicker" style="margin-bottom:6px">Tell ${U.esc(prof.coachSync.coachName || 'your coach')} how it went</div>
+      <div class="chips">${Object.entries(REACT_LABELS).map(([v, lbl]) => `<button class="chip" data-a="sum-react" data-v="${v}">${lbl}</button>`).join('')}</div>
+      <input class="ob-input mt8" id="sum-note" maxlength="200" placeholder="Add a note (optional)" autocomplete="off">
+    </div>` : ''}
     <button class="btn primary block mt16" id="summary-done">Done</button>
   </div></div>`);
-  document.getElementById('summary-done').addEventListener('click', () => document.getElementById('summary-veil').remove());
+  App._sumLog = res.log;
+  const noteIn = document.getElementById('sum-note');
+  if (noteIn) noteIn.addEventListener('input', () => { if (App._sumLog) App._sumLog.note = noteIn.value.slice(0, 200); });
+  document.getElementById('summary-done').addEventListener('click', () => {
+    document.getElementById('summary-veil').remove();
+    if (prof.coachSync && App._sumLog && (App._sumLog.react || App._sumLog.note)) {
+      prof.coachSync.pendingProgress = true; saveApp();
+      if (typeof syncTick === 'function') setTimeout(() => syncTick(true), 500);
+    }
+    App._sumLog = null;
+  });
 }
 
 /* ============ PLAN VIEW ============ */
@@ -4574,6 +4636,7 @@ function renderProgress(prof) {
         <span class="muted" style="margin-left:6px">${U.fmtDateShort(pr.date)}</span>
         <span class="w">${U.fmtW(pr.w, prof.units)}${U.unitLabel(prof.units)}</span></div>`).join('')}
     </div></div>` : ''}
+    ${historyCardHtml(prof)}
     ${shareCardHtml(prof)}
     ${badgesCardHtml(prof)}
     ${heatmapCardHtml(prof)}
@@ -5195,8 +5258,130 @@ function shareCardHtml(prof) {
   </div>`;
 }
 
+
+/* ---------- workout history: browse, fix, delete ---------- */
+const REACT_LABELS = { great: '💪 Great', right: '🎯 Just right', tough: '😅 Tough' };
+const REACT_EMOJI = { great: '💪', right: '🎯', tough: '😅' };
+
+function historyCardHtml(prof) {
+  const logs = (prof.logs || []).slice().reverse();
+  if (!logs.length) return '';
+  const showAll = !!App._histAll;
+  const list = showAll ? logs : logs.slice(0, 6);
+  const rows = list.map(l => {
+    const sets = l.entries.reduce((t, e) => t + e.sets.length, 0);
+    const vol = l.entries.reduce((t, e) => t + e.sets.reduce((v, s) => v + (s.w || 0) * ((EX_BY_ID[e.exId] || {}).timed ? 0 : s.reps), 0), 0);
+    return `<button class="pr-row" style="width:100%;text-align:left;cursor:pointer" data-a="hist-open" data-id="${l.id}">
+      <span class="medal">📅</span>${U.esc(l.dayName)}${l.react ? ' ' + REACT_EMOJI[l.react] : ''}
+      <span class="muted" style="margin-left:6px">${U.fmtDateShort(l.date)}</span>
+      <span class="w" style="font-size:12px">${sets} ${U.plural(sets, 'set')} · ${U.compact(vol)}kg</span>
+    </button>`;
+  }).join('');
+  return `<div class="card"><div class="row"><h3>History</h3><span class="spacer"></span><span class="muted">${logs.length} ${U.plural(logs.length, 'session')}</span></div>
+    <p class="muted mt8" style="font-size:12px">Tap a session to see every set — typos can be fixed there.</p>
+    <div class="mt8">${rows}</div>
+    ${logs.length > 6 ? `<button class="btn ghost sm block mt8" data-a="hist-more">${showAll ? 'Show fewer' : `Show all ${logs.length}`}</button>` : ''}
+  </div>`;
+}
+
+function showHistorySheet(prof, logId) {
+  const log = (prof.logs || []).find(l => l.id === logId);
+  if (!log) { closeSheet(); return; }
+  const ed = App._histEdit; // {ei, si} currently being edited
+  const u = prof.units;
+  const entries = log.entries.map((e, ei) => {
+    const ex = EX_BY_ID[e.exId] || { name: e.exId, timed: false };
+    const chips = e.sets.map((st, si) => {
+      if (ed && ed.ei === ei && ed.si === si) {
+        return `<span class="hist-editrow">
+          ${ex.timed ? '' : `<input class="hist-in" id="hi-w" type="text" inputmode="decimal" value="${st.w > 0 ? U.fmtW(st.w, u) : ''}" placeholder="${U.unitLabel(u)}">×`}
+          <input class="hist-in" id="hi-r" type="text" inputmode="numeric" value="${st.reps}" placeholder="${ex.timed ? 'sec' : 'reps'}">
+          <button class="hist-ok" data-a="hist-commit" data-ei="${ei}" data-si="${si}">✓</button>
+          <button class="hist-del" data-a="hist-delset" data-ei="${ei}" data-si="${si}" title="Remove this set">🗑</button>
+        </span>`;
+      }
+      const lbl = ex.timed ? `${st.reps}s` : `${st.w > 0 ? U.fmtW(st.w, u) : 'BW'}×${st.reps}`;
+      return `<button class="hist-chip" data-a="hist-set" data-ei="${ei}" data-si="${si}">${lbl}</button>`;
+    }).join('');
+    return `<div class="mt12"><div style="font-weight:800;font-size:14px">${U.esc(ex.name)}</div>
+      <div class="hist-sets mt8">${chips}</div></div>`;
+  }).join('');
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${U.esc(log.dayName)}</h3>
+    <p class="muted mt8">${U.fmtDate(log.date)} · ${log.durationMin} min${log.react ? ' · ' + REACT_LABELS[log.react] : ''}</p>
+    ${log.note ? `<div class="coach-note" style="margin-top:8px">“${U.esc(log.note)}”</div>` : ''}
+    <p class="muted" style="font-size:12px;margin-top:6px">Tap any set to fix it. Records and charts update automatically — next-time targets stay as they are.</p>
+    ${entries}
+    <button class="btn block mt16" style="background:#FBE9E7;color:#C0302C" data-a="hist-delses" data-id="${log.id}">🗑 Delete this session</button>
+    <button class="btn ghost block mt8" data-a="sheet-close">Close</button>`);
+}
+
+function histAfterChange(prof, logId, msg) {
+  rebuildDerived(prof);
+  if (prof.coachSync) { prof.coachSync.pendingProgress = true; if (typeof syncTick === 'function') setTimeout(() => syncTick(true), 800); }
+  saveApp();
+  App._histEdit = null;
+  if (logId) showHistorySheet(prof, logId); else closeSheet();
+  render();
+  if (msg) toast(msg);
+}
+
 /* ---------- v2 dispatch ---------- */
 function v2Action(a, el, prof) {
+  if (a === 'hist-open') { App._histEdit = null; App._histLog = el.dataset.id; closeSheet(); showHistorySheet(prof, el.dataset.id); return true; }
+  if (a === 'hist-more') { App._histAll = !App._histAll; render(); return true; }
+  if (a === 'hist-set') { App._histEdit = { ei: +el.dataset.ei, si: +el.dataset.si }; showHistorySheet(prof, App._histLog); return true; }
+  if (a === 'hist-commit') {
+    const log = (prof.logs || []).find(l => l.id === App._histLog); if (!log) return true;
+    const st = log.entries[+el.dataset.ei].sets[+el.dataset.si];
+    const ex = EX_BY_ID[log.entries[+el.dataset.ei].exId] || {};
+    const wIn = document.getElementById('hi-w'), rIn = document.getElementById('hi-r');
+    if (wIn) {
+      const v = parseFloat((wIn.value || '').replace(',', '.'));
+      st.w = isNaN(v) || v <= 0 ? 0 : Math.round(U.toKg(v, prof.units) * 100) / 100;
+    }
+    if (rIn) {
+      const r = parseInt(rIn.value, 10);
+      st.reps = U.clamp(isNaN(r) ? st.reps : r, 1, ex.timed ? 600 : 100);
+    }
+    histAfterChange(prof, App._histLog, 'Fixed ✓ — records updated');
+    return true;
+  }
+  if (a === 'hist-delset') {
+    const log = (prof.logs || []).find(l => l.id === App._histLog); if (!log) return true;
+    const entry = log.entries[+el.dataset.ei];
+    entry.sets.splice(+el.dataset.si, 1);
+    if (!entry.sets.length) log.entries.splice(+el.dataset.ei, 1);
+    if (!log.entries.length) {
+      prof.logs = prof.logs.filter(l => l.id !== log.id);
+      histAfterChange(prof, null, 'Session removed');
+    } else histAfterChange(prof, App._histLog, 'Set removed — records updated');
+    return true;
+  }
+  if (a === 'hist-delses') {
+    const id = el.dataset.id;
+    showConfirm('Delete this session?', 'It comes off your history, charts and records. Your plan and next-time targets stay as they are.', 'Keep it', 'Delete', ok => {
+      if (!ok) {
+        prof.logs = (prof.logs || []).filter(l => l.id !== id);
+        histAfterChange(prof, null, 'Session deleted 🗑');
+      }
+    });
+    return true;
+  }
+  if (a === 'sum-react') {
+    const log = App._sumLog; if (!log) return true;
+    log.react = log.react === el.dataset.v ? null : el.dataset.v;
+    saveApp();
+    document.querySelectorAll('[data-a="sum-react"]').forEach(c => c.classList.toggle('grad-on', c.dataset.v === log.react));
+    return true;
+  }
+  if (a === 'msg-react') {
+    prof.coachMsgReact = el.dataset.v;
+    prof.coachMsgSeen = true;
+    if (prof.coachSync) { prof.coachSync.pendingProgress = true; if (typeof syncTick === 'function') setTimeout(() => syncTick(true), 600); }
+    saveApp(); render();
+    toast(`Sent to ${prof.coachName || 'your coach'} ${el.dataset.v}`);
+    return true;
+  }
   if (a === 'trim-open') {
     showTrimSheet(prof, el.dataset.mode, el.dataset.idx !== '' ? +el.dataset.idx : null, el.dataset.id || null);
     return true;
@@ -5263,7 +5448,8 @@ function renderCoachHome(prof) {
     const liftsWk = (pg.logs || []).filter(l => l.date >= wkStart).length;
     const sportWk = (pg.sportLogs || []).filter(s => s.date >= wkStart).length;
     const lastLog = (pg.logs || [])[(pg.logs || []).length - 1];
-    latest = lastLog ? `${U.esc(lastLog.dayName)} · ${U.fmtDateShort(lastLog.date)} · ${lastLog.durationMin} min` : 'No workouts shared yet';
+    latest = lastLog ? `${U.esc(lastLog.dayName)} · ${U.fmtDateShort(lastLog.date)} · ${lastLog.durationMin} min${lastLog.react ? ' · ' + (REACT_LABELS[lastLog.react] || lastLog.react) : ''}` : 'No workouts shared yet';
+    if (lastLog && lastLog.note) latest += `<div class="coach-note" style="margin-top:8px;margin-bottom:0">“${U.esc(lastLog.note)}” <span class="muted">— ${U.esc(pg.name)}</span></div>`;
     herWeek = `<div class="sum-stats" style="margin-top:10px">
       <div class="s"><div class="v">${liftsWk}</div><div class="l">lifts this wk</div></div>
       <div class="s"><div class="v">${sportWk}</div><div class="l">sport days</div></div>
@@ -5299,6 +5485,7 @@ function renderCoachHome(prof) {
       <div class="row"><h3>💬 Message on their Today screen</h3></div>
       <textarea class="ob-input" id="co-msg" rows="2" maxlength="500" placeholder="e.g. Big week — focus on slow reps. Proud of you 🧡" style="width:100%;margin-top:10px;resize:vertical;font-size:14px">${U.esc(prof.coachMsg || '')}</textarea>
       <button class="btn sm dark mt8" data-a="co-msg-save">Send message</button>
+      ${pg && pg.msgReact ? `<div class="muted mt8">${U.esc(co.athleteName)} reacted ${pg.msgReact} to your message</div>` : ''}
     </div>
     ${pg ? `<div class="card"><div class="row"><h3>Latest from ${U.esc(pg.name)} ${pg.emoji || ''}</h3></div>
       <div class="muted mt8">${latest}</div>${herWeek}</div>` : `<div class="card"><h3>Waiting for ${U.esc(co.athleteName)} 💌</h3>
@@ -5338,7 +5525,7 @@ function renderCoachProgress(prof) {
     ${sessions.length ? `<div class="card"><h3>Recent sessions</h3><div class="mt8">
       ${sessions.map(l => {
         const top = l.entries.map(e => { const ex = EX_BY_ID[e.exId]; const w = Math.max(...e.sets.map(s => s.w || 0), 0); return ex && w > 0 ? `${ex.name} ${U.fmtW(w, shim.units)}` : null; }).filter(Boolean).slice(0, 2).join(' · ');
-        return `<div class="pr-row"><span class="medal">🏋️</span>${U.esc(l.dayName)}<span class="muted" style="margin-left:6px">${U.fmtDateShort(l.date)}</span><span class="w" style="font-size:12px">${U.esc(top || l.durationMin + ' min')}</span></div>`;
+        return `<div class="pr-row"><span class="medal">${l.react ? REACT_EMOJI[l.react] || '🏋️' : '🏋️'}</span>${U.esc(l.dayName)}${l.note ? ` <span class="muted" style="font-size:11.5px">“${U.esc(l.note.slice(0, 32))}${l.note.length > 32 ? '…' : ''}”</span>` : ''}<span class="muted" style="margin-left:6px">${U.fmtDateShort(l.date)}</span><span class="w" style="font-size:12px">${U.esc(top || l.durationMin + ' min')}</span></div>`;
       }).join('')}
     </div></div>` : ''}
     ${heatmapCardHtml(shim)}
@@ -5400,7 +5587,10 @@ function coachMsgCardHtml(prof) {
     <div class="ic">💬</div>
     <div style="flex:1"><div class="tt">${U.esc(prof.coachName || 'Your coach')} says</div>
     <div class="tx">${U.esc(prof.coachMsg)}</div>
-    <button class="btn ghost sm mt8" data-a="co-dismiss-msg">Got it 🧡</button></div>
+    <div class="row mt8" style="gap:7px">
+      ${['🧡', '💪', '🔥'].map(e => `<button class="chip" data-a="msg-react" data-v="${e}">${e}</button>`).join('')}
+      <button class="btn ghost sm" data-a="co-dismiss-msg">Got it</button>
+    </div></div>
   </div>`;
 }
 

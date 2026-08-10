@@ -448,7 +448,7 @@ const U = {
   lerp: (a, b, t) => a + (b - a) * t,
   ease: t => 0.5 - 0.5 * Math.cos(Math.PI * U.clamp(t, 0, 1)),
   todayISO: () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); },
-  parseISO: s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); },
+  parseISO: s => { if (!s || typeof s !== 'string') return new Date(); const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); },
   daysBetween: (a, b) => Math.round((U.parseISO(b) - U.parseISO(a)) / 864e5),
   fmtDate: iso => { const d = U.parseISO(iso); return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }); },
   fmtDateShort: iso => { const d = U.parseISO(iso); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); },
@@ -483,24 +483,47 @@ const U = {
 
 /* ---- storage: localStorage with in-memory fallback (preview contexts) ---- */
 const Store = (() => {
-  const KEY = 'liftoff.v1';
+  const KEY = 'liftoff.v1', BAK = 'liftoff.v1.bak', BAKDAY = 'liftoff.v1.bakday';
   let mem = null, usable = false;
   try {
     const t = '__lo_test__';
     localStorage.setItem(t, '1'); localStorage.removeItem(t);
     usable = true;
   } catch (e) { usable = false; }
+  const parse = raw => { const d = raw ? JSON.parse(raw) : null; return d && d.profiles ? d : null; };
   return {
     persistent: usable,
+    restored: false,   // true when this load came from the automatic backup
+    full: false,       // true when the last save hit a storage-quota error
     load() {
-      try {
-        const raw = usable ? localStorage.getItem(KEY) : mem;
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) { return null; }
+      let main = null;
+      try { main = parse(usable ? localStorage.getItem(KEY) : mem); } catch (e) { main = null; }
+      if (main) return main;
+      // main missing or corrupted → try the automatic daily backup
+      if (usable) {
+        try {
+          const bak = parse(localStorage.getItem(BAK));
+          if (bak && Object.keys(bak.profiles).length) { this.restored = true; return bak; }
+        } catch (e) { /* backup unreadable too */ }
+      }
+      return null;
     },
     save(data) {
       const raw = JSON.stringify(data);
-      if (usable) { try { localStorage.setItem(KEY, raw); } catch (e) { /* quota */ } }
+      if (usable) {
+        try {
+          // once a day, snapshot yesterday's state into the backup BEFORE overwriting
+          const today = new Date().toISOString().slice(0, 10);
+          if (localStorage.getItem(BAKDAY) !== today) {
+            const prev = localStorage.getItem(KEY);
+            // never roll an unreadable blob over a good backup
+            if (prev) { try { JSON.parse(prev); localStorage.setItem(BAK, prev); } catch (e) { /* keep old backup */ } }
+            localStorage.setItem(BAKDAY, today);
+          }
+          localStorage.setItem(KEY, raw);
+          this.full = false;
+        } catch (e) { this.full = true; }
+      }
       else mem = raw;
     },
     wipe() { if (usable) localStorage.removeItem(KEY); mem = null; },
@@ -2550,6 +2573,7 @@ function migrateProfile(p) {
   if (!p.bodyLogs) p.bodyLogs = [];
   if (!p.barKg) p.barKg = 20;
   if (p.plan && !p.plan.dayMap) p.plan.dayMap = assignDayMap(p.plan, p.quiz.weekSchedule);
+  if (p.plan && !p.plan.createdAt) p.plan.createdAt = p.createdAt || U.todayISO();
   if (!p.plan && p.quiz.goal) { try { p.plan = generatePlan(p); } catch (e) { /* keep going — Today view guards */ } }
   return p;
 }
@@ -2650,7 +2674,7 @@ function coachTips(profile) {
     }
   }
 
-  if (profile.plan && U.daysBetween(profile.plan.createdAt, today) > 56) {
+  if (profile.plan && profile.plan.createdAt && U.daysBetween(profile.plan.createdAt, today) > 56) {
     tips.push({ kind: 'refresh', icon: '✨', title: 'Fancy a fresh block?', text: 'This plan is 8+ weeks old. Regenerating gives you fresh exercises and a new stimulus — your strength records carry over.' });
   }
 
@@ -3227,7 +3251,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.2.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3243,13 +3267,27 @@ function defaultData() { return { version: 1, activeProfileId: null, profiles: {
 
 function loadApp() {
   App.data = Store.load() || defaultData();
+  App.storeRestored = Store.restored;
   if (!App.data.profiles) App.data.profiles = {};
-  for (const p of Object.values(App.data.profiles)) migrateProfile(p);
+  const prevVer = App.data.appVersion;
+  const updating = prevVer !== APP_VERSION && Object.keys(App.data.profiles).length > 0;
+  if (updating) {
+    // snapshot the pre-update state so any migration problem is recoverable
+    try {
+      localStorage.setItem('liftoff.v1.pre', JSON.stringify(App.data));
+      localStorage.setItem('liftoff.v1.prever', prevVer || '?');
+    } catch (e) { /* best effort */ }
+  }
+  for (const p of Object.values(App.data.profiles)) {
+    try { migrateProfile(p); } catch (e) { /* never let one profile block boot — raw data stays as-is */ }
+  }
   // version-change detection: reassure that data survived the update
-  App.justUpdated = !!(App.data.appVersion && App.data.appVersion !== APP_VERSION && Object.keys(App.data.profiles).length);
+  App.justUpdated = !!(prevVer && updating);
   if (App.data.appVersion !== APP_VERSION) { App.data.appVersion = APP_VERSION; saveApp(); }
+  if (App.storeRestored) saveApp(); // heal the main key immediately from the recovered state
   const p = activeProfile();
-  if (p && p.activeWorkout) App.workout = p.activeWorkout;
+  // restore an in-flight workout — but a PAUSED one stays paused (Today shows the resume card)
+  if (p && p.activeWorkout && !p.activeWorkout.pausedAt) App.workout = p.activeWorkout;
 }
 
 let _saveT = null;
@@ -3257,7 +3295,13 @@ function saveApp() {
   const _cp = activeProfile();
   if (_cp && _cp.isCoach && typeof coachMaybeDirty === 'function') coachMaybeDirty(_cp);
   if (_saveT) clearTimeout(_saveT);
-  _saveT = setTimeout(() => { Store.save(App.data); _saveT = null; }, 120);
+  _saveT = setTimeout(() => {
+    Store.save(App.data); _saveT = null;
+    if (Store.full && !App._quotaWarned && typeof toast === 'function') {
+      App._quotaWarned = true;
+      toast('⚠️ Phone storage is full — changes may not save. Export a backup from Profile.', 5000);
+    }
+  }, 120);
 }
 
 function activeProfile() {
@@ -3354,7 +3398,7 @@ function finishWorkout(prof) {
   const w = App.workout;
   const log = {
     id: w.id, date: w.date, dayName: w.dayName,
-    durationMin: Math.max(1, Math.round((Date.now() - w.startTs) / 60000)),
+    durationMin: Math.max(1, Math.round((Date.now() - w.startTs - (w.pauseMs || 0)) / 60000)),
     entries: w.entries.map(e => ({ exId: e.exId, plan: e.plan, feel: e.feel, sets: e.sets.filter(s => s.done) }))
       .filter(e => e.sets.length),
   };
@@ -3417,6 +3461,17 @@ const WakeLock = {
   off() { try { this.s && this.s.release(); } catch (e) { } this.s = null; },
 };
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && App.workout) WakeLock.on(); });
+
+/* never silently bin a paused workout that has ticked sets */
+function guardPausedThen(prof, fn) {
+  const aw = prof.activeWorkout;
+  const ticked = aw && aw.entries.some(e => e.sets.some(s => s.done));
+  if (!ticked) { fn(); return; }
+  const n = aw.entries.reduce((t, e) => t + e.sets.filter(s => s.done).length, 0);
+  showConfirm('Start a fresh workout?', `You've a paused “${aw.dayName}” with ${n} ${n === 1 ? 'set' : 'sets'} ticked. Starting a new one throws that away.`, 'Keep the paused one', 'Start fresh', ok => {
+    if (!ok) { prof.activeWorkout = null; fn(); }
+  });
+}
 let _players = [];   // live animation players to dispose on re-render
 let _elapsedIv = null;
 
@@ -3709,7 +3764,21 @@ function renderToday(prof) {
   const u = prof.units;
 
   let hero = '';
-  if (act === 'lift' && nl && nl.inDays === 0 && !liftedToday) {
+  const aw = prof.activeWorkout;
+  if (aw && !App.workout) {
+    const doneS = aw.entries.reduce((t, e) => t + e.sets.filter(x => x.done).length, 0);
+    const totS = aw.entries.reduce((t, e) => t + e.sets.length, 0);
+    const mins = aw.pausedAt ? Math.max(1, Math.round((Date.now() - aw.pausedAt) / 60000)) : 0;
+    hero = `<div class="card hero">
+      <div class="kicker">Paused workout ⏸</div>
+      <h2 style="font-size:24px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">${U.esc(aw.dayName)}</h2>
+      <div style="font-size:13px;opacity:.92;position:relative;z-index:1">${doneS} of ${totS} sets ticked${mins ? ` · paused ${mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h'} ago` : ''} — carry on where you left off.</div>
+      <div class="row mt16" style="position:relative;z-index:1">
+        <button class="btn onhero" style="flex:1" data-a="wo-resume">▶ Resume workout</button>
+        <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="wo-discard-ask">Discard</button>
+      </div>
+    </div>`;
+  } else if (act === 'lift' && nl && nl.inDays === 0 && !liftedToday) {
     const w4d = workoutForWeekday(prof, wd) || { type: 'plan', idx: nl.planIdx, name: prof.plan.days[nl.planIdx].name, exercises: prof.plan.days[nl.planIdx].exercises };
     const day = { name: w4d.name, exercises: w4d.exercises };
     const dayList = day.exercises.slice(0, 6).map(pe => {
@@ -3904,7 +3973,7 @@ function afterWorkoutRender(prof) {
   const w = App.workout;
   const tick = () => {
     const el = document.getElementById('wo-elapsed'); if (!el) return;
-    const s = Math.floor((Date.now() - w.startTs) / 1000);
+    const s = Math.max(0, Math.floor((Date.now() - w.startTs - (w.pauseMs || 0)) / 1000));
     el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   };
   tick();
@@ -3921,7 +3990,40 @@ function stepSize(ex, units) {
 function workoutAction(a, el, prof) {
   const w = App.workout;
   if (a === 'start-workout') { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); return; }
-  if (a === 'wo-exit') { showConfirm('Leave this workout?', 'Your logged sets are kept — you can pick it back up from Today.', 'Keep training', 'Leave', ok => { if (!ok) { App.view = 'today'; App.workout = null; stopRest(); WakeLock.off(); render(); } }); return; }
+  if (a === 'wo-exit') {
+    const done = w.entries.reduce((t, e) => t + e.sets.filter(x => x.done).length, 0);
+    const total = w.entries.reduce((t, e) => t + e.sets.length, 0);
+    showSheet(`<h3 style="font-size:19px;font-weight:900">Take a break?</h3>
+      <p class="muted mt8" style="margin-bottom:12px">You've ticked ${done} of ${total} sets. Whatever you pick, nothing is lost by accident.</p>
+      <button class="btn primary block" data-a="wo-pause">⏸ Pause — finish later</button>
+      <button class="btn ghost block mt8" data-a="sheet-close">Keep training 💪</button>
+      <button class="btn block mt8" style="background:#FBE9E7;color:#C0302C" data-a="wo-discard-ask">🗑 Discard this workout</button>`);
+    return;
+  }
+  if (a === 'wo-pause') {
+    w.pausedAt = Date.now();
+    prof.activeWorkout = w;
+    App.workout = null; App.view = 'today';
+    stopRest(); WakeLock.off(); closeSheet(); saveApp(); render();
+    toast('Paused ⏸ — pick it back up from Today whenever you like');
+    return;
+  }
+  if (a === 'wo-discard-ask') {
+    closeSheet();
+    showConfirm('Discard this workout?', 'Nothing gets logged and the ticked sets are thrown away. Your plan, history and records are untouched.', 'Keep it', 'Discard', ok => {
+      if (!ok) { discardWorkout(prof); stopRest(); WakeLock.off(); render(); toast('Binned — fresh start next time 🗑'); }
+    });
+    return;
+  }
+  if (a === 'wo-resume') {
+    const aw = prof.activeWorkout;
+    if (!aw) return;
+    if (aw.pausedAt) { aw.pauseMs = (aw.pauseMs || 0) + (Date.now() - aw.pausedAt); delete aw.pausedAt; }
+    App.workout = aw;
+    Sound.unlock(); WakeLock.on(); saveApp(); render();
+    toast('Back at it 💪');
+    return;
+  }
   if (a === 'wo-discard') { discardWorkout(prof); stopRest(); render(); return; }
   if (a === 'wo-step') {
     const e = w.entries[+el.dataset.ei], s = e.sets[+el.dataset.si];
@@ -3972,6 +4074,7 @@ function workoutAction(a, el, prof) {
     const e = w.entries[ei], s = e.sets[si];
     s.done = !s.done;
     if (s.done) {
+      try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* not supported */ }
       const ex = EX_BY_ID[e.exId];
       const nxt = e.sets[si + 1];
       if (nxt && !nxt.done && !ex.timed) { nxt.w = s.w; }
@@ -4254,6 +4357,7 @@ function showChooseDaySheet(prof) {
 /* ============ SUMMARY ============ */
 function showSummary(prof, res) {
   Sound.done();
+  try { if (navigator.vibrate) navigator.vibrate(res.prs.length ? [40, 60, 40, 60, 80] : [30, 50, 30]); } catch (err) { /* not supported */ }
   Confetti.burst(res.prs.length ? 160 : 110);
   if (res.prs.length) setTimeout(() => Sound.pr(), 500);
   const vol = res.log.entries.reduce((t, e) => t + e.sets.reduce((v, s) => v + (s.w || 0) * (EX_BY_ID[e.exId].timed ? 0 : s.reps), 0), 0);
@@ -4537,6 +4641,9 @@ function renderProfileView(prof) {
       <div class="set-row"><div><div class="l">Units</div><div class="d">Weights shown in ${prof.units === 'lb' ? 'pounds' : 'kilograms'}</div></div>
         <div class="seg" style="margin:0;width:130px"><button class="${prof.units === 'kg' ? 'on' : ''}" data-a="set-units" data-v="kg">kg</button><button class="${prof.units === 'lb' ? 'on' : ''}" data-a="set-units" data-v="lb">lb</button></div>
       </div>
+      <div class="set-row"><div><div class="l">Barbell weight</div><div class="d">Used for the plate maths in workouts</div></div>
+        <div class="seg" style="margin:0;width:170px">${[10, 15, 20].map(v => `<button class="${(prof.barKg || 20) === v ? 'on' : ''}" data-a="set-barkg" data-v="${v}">${v}kg</button>`).join('')}</div>
+      </div>
     </div>
     <div class="card">
       <h3>Your data</h3>
@@ -4572,11 +4679,11 @@ function dispatch(e) {
   if (a === 'ex-open') { App._vidChoice = null; closeSheet(); showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'vid-pick') { App._vidChoice = { exId: el.dataset.ex, i: +el.dataset.i }; showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'choose-day') { showChooseDaySheet(prof); return; }
-  if (a === 'start-workout') { closeSheet(); Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); return; }
+  if (a === 'start-workout') { closeSheet(); guardPausedThen(prof, () => { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); }); return; }
   // custom workout actions
   if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
-  if (['wo-exit', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
+  if (['wo-exit', 'wo-pause', 'wo-discard-ask', 'wo-resume', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
   if (a === 'do-swap') {
     const ei = +el.dataset.ei;
@@ -4681,6 +4788,7 @@ function dispatch(e) {
   }
   if (a === 'prof-add') { App.creating = true; App.onboarding = null; render(); return; }
   if (a === 'set-units') { prof.units = el.dataset.v; saveApp(); render(); return; }
+  if (a === 'set-barkg') { prof.barKg = +el.dataset.v; saveApp(); render(); toast(`Plate maths now assumes a ${prof.barKg}kg bar 🏋️`); return; }
   if (a === 'data-export') { exportBackup(); toast('Backup downloaded 💾'); return; }
   if (a === 'data-import') {
     const inp = document.getElementById('import-file');
@@ -4938,9 +5046,13 @@ function customAction(a, el, prof) {
     return;
   }
   if (a === 'start-custom') {
-    closeSheet(); Sound.unlock(); WakeLock.on();
-    startCustomWorkout(prof, el.dataset.id);
-    render(); return;
+    closeSheet();
+    guardPausedThen(prof, () => {
+      Sound.unlock(); WakeLock.on();
+      startCustomWorkout(prof, el.dataset.id);
+      render();
+    });
+    return;
   }
 }
 
@@ -5091,11 +5203,15 @@ function v2Action(a, el, prof) {
   }
   if (a === 'trim-start') {
     const min = +el.dataset.min;
-    closeSheet(); Sound.unlock(); WakeLock.on();
-    if (el.dataset.mode === 'custom') startCustomWorkout(prof, el.dataset.id, min);
-    else startWorkout(prof, +el.dataset.idx, min);
-    render();
-    toast(`⚡ Trimmed to ~${min} min — every set still counts`);
+    const mode = el.dataset.mode, id = el.dataset.id, idx = +el.dataset.idx;
+    closeSheet();
+    guardPausedThen(prof, () => {
+      Sound.unlock(); WakeLock.on();
+      if (mode === 'custom') startCustomWorkout(prof, id, min);
+      else startWorkout(prof, idx, min);
+      render();
+      toast(`⚡ Trimmed to ~${min} min — every set still counts`);
+    });
     return true;
   }
   if (a === 'deload-start') {

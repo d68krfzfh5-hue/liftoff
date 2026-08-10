@@ -419,6 +419,17 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 /* builder superset toggle */
 .cwx-ctl.cwx-link.on { background: #F1EDFF; color: #6B3FD9; border-color: transparent; }
 @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+/* ============ v2.1 — coach mode ============ */
+.paircode { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 17px; font-weight: 800;
+  letter-spacing: 1.5px; text-align: center; background: var(--grad-soft); color: #C2400C;
+  border-radius: var(--rs); padding: 16px 10px; margin-top: 12px; user-select: all; word-break: break-all; }
+.coach-note { background: #FBF9FF; border: 1.5px solid #E7DEFF; color: #4B3A78; border-radius: var(--rs);
+  padding: 10px 13px; font-size: 13.5px; line-height: 1.45; margin-bottom: 12px; }
+.wo-note { font-size: 12.5px; color: #6B3FD9; background: #F6F2FF; border-radius: 9px;
+  padding: 5px 9px; margin-top: 4px; display: inline-block; line-height: 1.4; }
+.cwx-note { width: 100%; margin-top: 7px; border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 8px 11px; font-size: 12.5px; font-family: inherit; background: #FBF9FF; }
+.cwx-note:focus { outline: none; border-color: #B9A5F0; }
 
 </style>
 </head>
@@ -2806,6 +2817,272 @@ if (typeof module !== 'undefined') module.exports = Object.assign(module.exports
 });
 
 
+/* ============ LiftOff v2.1 — coach sync (logic layer) ============
+   One coach phone ↔ one athlete phone, linked by an unguessable pair code.
+   All traffic goes through exact-key RPCs — no accounts, no listing.       */
+'use strict';
+
+const SYNC_CFG = {
+  base: (() => { try { return localStorage.getItem('liftoff.syncbase') || 'https://ptldgjidlfirobqrazeo.supabase.co'; } catch (e) { return 'https://ptldgjidlfirobqrazeo.supabase.co'; } })(),
+  key: 'sb_publishable_6M1oG5Tbv6Mi3vzxpUw3xg_BdaiT4mx',
+};
+
+async function syncRpc(name, body) {
+  const r = await fetch(SYNC_CFG.base + '/rest/v1/rpc/' + name, {
+    method: 'POST',
+    headers: { apikey: SYNC_CFG.key, Authorization: 'Bearer ' + SYNC_CFG.key, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  if (!r.ok) throw new Error('sync ' + r.status);
+  const t = await r.text();
+  return t && t !== 'null' ? JSON.parse(t) : null;
+}
+
+/* ---------- pair codes: LIFT-XXXXX-XXXXX-XXXXX-XXXXX ---------- */
+const PAIR_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // no 0/1/I/L/O — nothing to misread
+function makePairKey() {
+  const buf = new Uint8Array(20);
+  crypto.getRandomValues(buf);
+  let k = '';
+  for (let i = 0; i < 20; i++) k += PAIR_ALPHABET[buf[i] % PAIR_ALPHABET.length];
+  return k;
+}
+function fmtPairKey(k) { return 'LIFT-' + (k.match(/.{1,5}/g) || []).join('-'); }
+function normalizePairKey(input) {
+  // accept any format: with/without LIFT prefix, dashes, spaces, lowercase
+  const cleaned = String(input || '').toUpperCase().trim().replace(/^LIFT[\s-]*/, '');
+  let k = '';
+  for (const ch of cleaned) if (PAIR_ALPHABET.includes(ch)) k += ch;
+  return k.length === 20 ? k : null;
+}
+
+/* ---------- compact exercise rows for the wire ---------- */
+function packPe(pe) {
+  const o = { exId: pe.exId, sets: pe.sets, repsMin: pe.repsMin, repsMax: pe.repsMax, rest: pe.rest };
+  if (pe.timed) o.timed = true;
+  if (pe.slotType) o.slotType = pe.slotType;
+  if (pe.ssWithNext) o.ssWithNext = true;
+  if (pe.note) o.note = String(pe.note).slice(0, 200);
+  return o;
+}
+function sanitizePe(pe) {
+  if (!pe || !EX_BY_ID[pe.exId]) return null;
+  const ex = EX_BY_ID[pe.exId];
+  const timed = !!ex.timed;
+  const repsMax = U.clamp(+pe.repsMax || (timed ? 40 : 10), 2, timed ? 300 : 30);
+  return {
+    exId: pe.exId,
+    sets: U.clamp(+pe.sets || 3, 1, 8),
+    repsMin: U.clamp(+pe.repsMin || (timed ? 20 : 6), 1, repsMax - 1),
+    repsMax,
+    rest: U.clamp(+pe.rest || 60, 15, 300),
+    timed,
+    slotType: typeof pe.slotType === 'string' ? pe.slotType.slice(0, 12) : 'acc',
+    ssWithNext: !!pe.ssWithNext,
+    note: pe.note ? String(pe.note).slice(0, 200) : undefined,
+  };
+}
+
+/* ---------- documents on the wire ---------- */
+function buildPlanDoc(prof) { // coach workspace → athlete
+  const plan = prof.plan || { days: [], daysPerWeek: 3 };
+  return {
+    v: 1,
+    coach: (prof.coachDisplayName || '').slice(0, 30) || 'Your coach',
+    msg: (prof.coachMsg || '').slice(0, 500),
+    daysPerWeek: plan.daysPerWeek || (plan.days || []).length || 3,
+    weekSchedule: prof.quiz && prof.quiz.weekSchedule ? prof.quiz.weekSchedule : null,
+    days: (plan.days || []).map(d => ({
+      name: (d.name || 'Workout').slice(0, 40),
+      focus: d.focus || null,
+      note: d.note ? String(d.note).slice(0, 300) : '',
+      exercises: (d.exercises || []).map(packPe),
+    })),
+    customs: (prof.customWorkouts || []).slice(0, 12).map(c => ({
+      id: c.id, name: (c.name || 'Workout').slice(0, 40),
+      note: c.note ? String(c.note).slice(0, 300) : '',
+      exercises: (c.exercises || []).map(packPe),
+    })),
+    customMap: prof.customMap || {},
+  };
+}
+
+function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/PRs/history untouched
+  const days = (doc.days || []).map(d => ({
+    name: d.name || 'Workout', focus: Array.isArray(d.focus) ? d.focus : [],
+    note: d.note || '', coach: true, edited: true,
+    exercises: (d.exercises || []).map(sanitizePe).filter(Boolean),
+  })).filter(d => d.exercises.length);
+  if (!days.length) return false;
+  prof.plan = prof.plan || {};
+  prof.plan.days = days;
+  prof.plan.daysPerWeek = U.clamp(+doc.daysPerWeek || days.length, 1, 7);
+  prof.plan.coachRev = rev;
+  if (doc.weekSchedule && typeof doc.weekSchedule === 'object') prof.quiz.weekSchedule = doc.weekSchedule;
+  prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+  // coach-sent custom workouts replace previous coach-sent ones; hers stay
+  const hers = (prof.customWorkouts || []).filter(c => !c.fromCoach);
+  const coachCustoms = (doc.customs || []).map(c => ({
+    id: c.id || U.uid(), name: c.name || 'Workout', note: c.note || '', fromCoach: true,
+    exercises: (c.exercises || []).map(sanitizePe).filter(Boolean),
+  })).filter(c => c.exercises.length);
+  prof.customWorkouts = hers.concat(coachCustoms);
+  if (doc.customMap && typeof doc.customMap === 'object') {
+    prof.customMap = prof.customMap || {};
+    const validIds = new Set(prof.customWorkouts.map(c => c.id));
+    for (const [wd, id] of Object.entries(doc.customMap)) if (validIds.has(id)) prof.customMap[wd] = id;
+  }
+  prof.coachName = doc.coach || 'Your coach';
+  const newMsg = doc.msg || '';
+  if (newMsg && newMsg !== prof.coachMsg) prof.coachMsgSeen = false;
+  prof.coachMsg = newMsg;
+  if (prof.coachSync) prof.coachSync.appliedPlanRev = rev;
+  return true;
+}
+
+function buildProgressDoc(prof) { // athlete → coach: last 90 days + current state
+  const cutD = new Date(); cutD.setDate(cutD.getDate() - 90);
+  const cut = cutD.getFullYear() + '-' + String(cutD.getMonth() + 1).padStart(2, '0') + '-' + String(cutD.getDate()).padStart(2, '0');
+  const exTop = {};
+  for (const [id, st] of Object.entries(prof.exState || {})) {
+    const h = st.history && st.history[st.history.length - 1];
+    if (h) exTop[id] = { d: h.date, w: h.topW, e: h.e1rm };
+  }
+  return {
+    v: 1, name: prof.name, emoji: prof.emoji, units: prof.units || 'kg',
+    quiz: {
+      goal: prof.quiz.goal, experience: prof.quiz.experience, daysPerWeek: prof.quiz.daysPerWeek,
+      sessionMinutes: prof.quiz.sessionMinutes, equipment: prof.quiz.equipment, focus: prof.quiz.focus,
+      athleteType: prof.quiz.athleteType, sportLabel: prof.quiz.sportLabel,
+      weekSchedule: prof.quiz.weekSchedule, videoPref: prof.quiz.videoPref,
+    },
+    plan: prof.plan ? {
+      daysPerWeek: prof.plan.daysPerWeek,
+      days: (prof.plan.days || []).map(d => ({ name: d.name, focus: d.focus || null, note: d.note || '', exercises: (d.exercises || []).map(packPe) })),
+    } : null,
+    logs: (prof.logs || []).filter(l => l.date >= cut).slice(-45).map(l => ({
+      date: l.date, dayName: l.dayName, durationMin: l.durationMin,
+      entries: (l.entries || []).map(e => ({ exId: e.exId, sets: (e.sets || []).map(s => ({ w: s.w || 0, reps: s.reps || 0 })) })),
+    })),
+    sportLogs: (prof.sportLogs || []).filter(s => s.date >= cut).slice(-90),
+    prs: prof.prs || {},
+    exTop,
+    bodyLogs: (prof.bodyLogs || []).slice(-20),
+    badges: prof.badges || {},
+    totals: { workouts: (prof.logs || []).length, since: prof.createdAt },
+    appliedPlanRev: prof.coachSync ? (prof.coachSync.appliedPlanRev || 0) : 0,
+  };
+}
+
+/* ---------- sync engine (runs over every profile, not just the active one) ---------- */
+async function athleteSyncTick(prof, force) {
+  const cs = prof.coachSync; if (!cs) return false;
+  let changed = false;
+  if (cs.pendingProgress) {
+    const rev = await syncRpc('lo_push_progress', { p_key: cs.key, p_doc: buildProgressDoc(prof) });
+    if (rev != null) { cs.pendingProgress = false; cs.lastPushAt = Date.now(); changed = true; }
+  }
+  const revs = await syncRpc('lo_revs', { p_key: cs.key });
+  if (!revs) { cs.lastErr = 'pair-missing'; return changed; } // coach ended it or key wrong
+  cs.lastErr = null;
+  if (revs.coach) cs.coachName = revs.coach;
+  const applied = cs.appliedPlanRev || 0;
+  const pendingRev = prof.pendingCoachPlan ? prof.pendingCoachPlan.rev : 0;
+  if (revs.planRev > applied && revs.planRev !== pendingRev) {
+    const full = await syncRpc('lo_pull', { p_key: cs.key });
+    if (full && full.plan) {
+      prof.pendingCoachPlan = { rev: full.planRev, doc: full.plan, at: full.planAt };
+      changed = true;
+    }
+  }
+  cs.lastSyncAt = Date.now();
+  return changed;
+}
+
+async function coachSyncTick(prof, force) {
+  const co = prof.coachOf; if (!co) return false;
+  let changed = false;
+  if (co.pendingPlanPush || force === 'push') {
+    const rev = await syncRpc('lo_push_plan', { p_key: co.key, p_doc: buildPlanDoc(prof) });
+    if (rev != null) {
+      co.pendingPlanPush = false; co.lastPlanRev = rev; co.lastPushedJson = JSON.stringify(buildPlanDoc(prof));
+      co.lastPushAt = Date.now(); changed = true;
+    }
+  }
+  const revs = await syncRpc('lo_revs', { p_key: co.key });
+  if (!revs) { co.lastErr = 'pair-missing'; return changed; }
+  co.lastErr = null;
+  if (revs.progressRev > (co.progressRev || 0)) {
+    const full = await syncRpc('lo_pull', { p_key: co.key });
+    if (full && full.progress) {
+      co.progress = full.progress; co.progressRev = full.progressRev; co.progressAt = full.progressAt;
+      // first contact: adopt her setup so the editor works with HER kit and goals
+      if (!co.adoptedQuiz && full.progress.quiz) {
+        const q = full.progress.quiz;
+        for (const k of ['goal', 'experience', 'daysPerWeek', 'sessionMinutes', 'equipment', 'focus', 'athleteType', 'sportLabel', 'weekSchedule', 'videoPref'])
+          if (q[k] != null) prof.quiz[k] = q[k];
+        prof.units = full.progress.units || prof.units;
+        co.adoptedQuiz = true;
+      }
+      changed = true;
+    }
+  }
+  co.athleteRev = revs.planRev; // what the server holds
+  co.lastSyncAt = Date.now();
+  return changed;
+}
+
+let _syncBusy = false;
+async function syncTick(force) {
+  if (_syncBusy || !App.data || !App.data.profiles) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const now = Date.now();
+  if (!force && App._lastSyncTry && now - App._lastSyncTry < 60000) return;
+  App._lastSyncTry = now;
+  _syncBusy = true;
+  let changed = false;
+  try {
+    for (const prof of Object.values(App.data.profiles)) {
+      try {
+        if (prof.isCoach && prof.coachOf) changed = (await coachSyncTick(prof, force)) || changed;
+        else if (prof.coachSync) changed = (await athleteSyncTick(prof, force)) || changed;
+      } catch (e) {
+        const t = prof.coachOf || prof.coachSync;
+        if (t) t.lastErr = 'offline';
+      }
+    }
+  } finally { _syncBusy = false; }
+  if (changed) { saveApp(); if (!App.workout) render(); }
+}
+
+/* mark the coach workspace dirty whenever its plan/notes/customs change */
+function coachMaybeDirty(prof) {
+  if (!prof || !prof.isCoach || !prof.coachOf) return;
+  const j = JSON.stringify(buildPlanDoc(prof));
+  if (j !== prof.coachOf.lastPushedJson) {
+    prof.coachOf.pendingPlanPush = true;
+    clearTimeout(App._coachPushT);
+    App._coachPushT = setTimeout(() => syncTick(true), 2500);
+  }
+}
+
+function syncStatusLine(t) { // shared little status formatter
+  if (!t) return '';
+  if (t.lastErr === 'pair-missing') return '⚠️ pairing not found — re-check the code';
+  if (t.pendingPlanPush || t.pendingProgress) return navigator.onLine === false ? '📴 offline — will send when back online' : '↻ sending…';
+  if (t.lastSyncAt) {
+    const m = Math.round((Date.now() - t.lastSyncAt) / 60000);
+    return m < 1 ? '✓ synced just now' : m < 60 ? `✓ synced ${m} min ago` : `✓ synced ${Math.round(m / 60)}h ago`;
+  }
+  return '';
+}
+
+if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
+  makePairKey, fmtPairKey, normalizePairKey, packPe, sanitizePe,
+  buildPlanDoc, applyPlanDoc, buildProgressDoc,
+});
+
+
 /* ============ LiftOff — SVG charts (line, bars, sparkline) ============
    Colors follow the validated categorical palette: slot1 #2a78d6, slot2 #eb6834.
    2px lines, ≥8px end markers with surface ring, hairline grid, text in ink tokens.
@@ -2947,7 +3224,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -2974,6 +3251,8 @@ function loadApp() {
 
 let _saveT = null;
 function saveApp() {
+  const _cp = activeProfile();
+  if (_cp && _cp.isCoach && typeof coachMaybeDirty === 'function') coachMaybeDirty(_cp);
   if (_saveT) clearTimeout(_saveT);
   _saveT = setTimeout(() => { Store.save(App.data); _saveT = null; }, 120);
 }
@@ -3041,6 +3320,7 @@ function startWorkout(prof, dayIdx, trimMin) {
   if (entries.length) entries[0].warmup = warmupFor(prof, entries[0]);
   App.workout = {
     id: U.uid(), date: U.todayISO(), startTs: Date.now(), dayIdx, dayName: day.name,
+    coachNote: day.note || '',
     entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
   };
   prof.activeWorkout = App.workout;
@@ -3056,7 +3336,8 @@ function startCustomWorkout(prof, cwId, trimMin) {
   if (entries.length) entries[0].warmup = warmupFor(prof, entries[0]);
   App.workout = {
     id: U.uid(), date: U.todayISO(), startTs: Date.now(), dayIdx: null, customId: cwId,
-    dayName: cw.name, entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
+    dayName: cw.name, coachNote: cw.note || '',
+    entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
   };
   prof.activeWorkout = App.workout;
   saveApp();
@@ -3082,6 +3363,10 @@ function finishWorkout(prof) {
   if (w.dayIdx != null && prof.plan) prof.plan.nextDayIdx = ((w.dayIdx + 1) % prof.plan.days.length);
   prof.activeWorkout = null;
   App.workout = null;
+  if (prof.coachSync) {
+    prof.coachSync.pendingProgress = true;
+    if (typeof syncTick === 'function') setTimeout(() => syncTick(true), 1200);
+  }
   saveApp();
   return { log, prs, msgs, badges };
 }
@@ -3160,10 +3445,10 @@ function render() {
   if (!prof || App.creating) { app.innerHTML = renderOnboarding(); bindOnboarding(); return; }
   if (App.workout) { app.innerHTML = renderWorkout(prof); afterWorkoutRender(prof); return; }
   let html = '';
-  if (App.view === 'today') html = renderToday(prof);
+  if (App.view === 'today') html = prof.isCoach ? renderCoachHome(prof) : renderToday(prof);
   else if (App.view === 'plan') html = renderPlanView(prof);
   else if (App.view === 'library') html = renderLibrary(prof);
-  else if (App.view === 'progress') html = renderProgress(prof);
+  else if (App.view === 'progress') html = prof.isCoach ? renderCoachProgress(prof) : renderProgress(prof);
   else html = renderProfileView(prof);
   app.innerHTML = html + renderTabs();
   afterRender(prof);
@@ -3481,7 +3766,9 @@ function renderToday(prof) {
       <button class="avatar" data-a="tab" data-id="profile">${prof.emoji}</button>
     </div>
     ${weeks >= 2 ? `<div style="margin-bottom:12px"><span class="streak-chip">🔥 ${weeks}-week streak</span></div>` : ''}
+    ${coachPlanCardHtml(prof)}
     ${hero}
+    ${coachMsgCardHtml(prof)}
     <div class="card">
       <div class="row"><h3>This week</h3><span class="spacer"></span><span class="muted">${wk.done}/${wk.target} lifts</span></div>
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
@@ -3505,6 +3792,7 @@ function renderWorkout(prof) {
       <button class="btn sm dark" data-a="wo-finish">Finish</button>
     </div>
     <div class="ob-progress" style="margin:2px 0 14px"><i style="width:${totalSets ? doneSets / totalSets * 100 : 0}%"></i></div>
+    ${w.coachNote ? `<div class="coach-note">📝 <b>${U.esc(prof.coachName || 'Coach')}:</b> ${U.esc(w.coachNote)}</div>` : ''}
     ${w.entries.map((e, ei) => renderWorkoutEx(prof, e, ei)).join('')}
     <button class="btn ghost block" data-a="wo-add-ex">+ Add an exercise</button>
     <div style="height:70px"></div>
@@ -3527,6 +3815,7 @@ function renderWorkoutEx(prof, e, ei) {
   const plates = ex.equip.includes('barbell') && !ex.bw && topW > (prof.barKg || 20) ? plateBreakdown(topW, prof.barKg || 20) : null;
   const plateLine = plates ? `<div class="wo-plates">🏋️ ${prof.barKg || 20}kg bar + <b>${plates.perSide}</b>/side (${plates.plates.join(' + ')})${plates.exact ? '' : ' ≈'}</div>` : '';
   const ssBadge = plan.ssWithNext ? `<span class="tag" style="background:#F1EDFF;color:#6B3FD9">🔗 superset with next</span>` : '';
+  const noteLine = plan.note ? `<div class="wo-note">📝 <b>${U.esc(prof.coachName || 'Coach')}:</b> ${U.esc(plan.note)}</div>` : '';
   const warmupRows = (e.warmup || []).map((ws, wi) => `
       <div class="setrow warmrow">
         <div class="sn">W</div>
@@ -3536,7 +3825,7 @@ function renderWorkoutEx(prof, e, ei) {
       </div>`).join('');
   return `<div class="wo-ex ${active ? 'active' : ''} ${complete ? 'done-ex' : ''}" data-ei="${ei}">
     <div class="wo-ex-head">
-      <div style="flex:1"><div class="nm">${U.esc(ex.name)} ${ssBadge}</div><div class="wo-target">${tgt}</div>${lastLine}${plateLine}${hint}</div>
+      <div style="flex:1"><div class="nm">${U.esc(ex.name)} ${ssBadge}</div><div class="wo-target">${tgt}</div>${noteLine}${lastLine}${plateLine}${hint}</div>
       <button class="iconbtn" data-a="wo-how" data-ex="${ex.id}" title="How to">🎬</button>
       <button class="iconbtn" data-a="wo-swap" data-ei="${ei}" title="Swap">🔁</button>
     </div>
@@ -4020,8 +4309,9 @@ function renderPlanView(prof) {
           <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}</h3>
           <div class="focus">${d.focus.map(f => GROUP_LABELS[f] || f).join(' · ')} · ~${estMinutes(d)} min</div></div>
           <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day">✏️</button>
-          <button class="btn sm dark" data-a="start-workout" data-idx="${i}">Start</button>
+          ${prof.isCoach ? '' : `<button class="btn sm dark" data-a="start-workout" data-idx="${i}">Start</button>`}
         </div>
+        ${d.note ? `<div class="coach-note" style="margin-top:8px">📝 ${U.esc(d.note)}</div>` : ''}
         <div class="mt8">
         ${d.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; const t = nextTargets(prof, pe);
@@ -4194,6 +4484,15 @@ function renderProfileView(prof) {
       <div class="muted">Training since ${U.fmtDateShort(prof.createdAt)} · ${prof.logs.length} ${U.plural(prof.logs.length, 'workout')}</div>
       <button class="btn ghost sm mt12" data-a="prefs-open">Edit goals & preferences</button>
     </div>
+    ${prof.isCoach ? '' : prof.coachSync ? `<div class="card"><h3>💌 My coach</h3>
+      <p class="muted mt8">Paired with <b>${U.esc(prof.coachSync.coachName || 'your coach')}</b> — they can update your plan, leave you notes and see your training. ${U.esc(syncStatusLine(prof.coachSync))}</p>
+      <div class="row mt8"><button class="btn ghost sm" data-a="co-sync-now">Check for updates</button>
+      <button class="btn ghost sm" style="color:#C0302C" data-a="co-unpair">Unpair</button></div>
+    </div>` : `<div class="card"><h3>💌 Coaching</h3>
+      <p class="muted mt8">Got a coach? Enter their code and they'll build your plan and cheer you on. Or flip it — coach someone else from this phone.</p>
+      <div class="row mt8"><button class="btn ghost sm" data-a="co-pair-open">I have a coach code</button>
+      <button class="btn ghost sm" data-a="co-start">👟 Coach someone</button></div>
+    </div>`}
     <div class="card">
       <h3>Who's training?</h3>
       <div class="mt8">
@@ -4241,6 +4540,8 @@ function dispatch(e) {
   if (a.startsWith('ob-') || a === 'wb-set') return obAction(a, el);
   // v2: trimmer, deload, badges/share, body log, exercise prefs
   if (prof && v2Action(a, el, prof)) return;
+  // v2.1: coach mode
+  if (a.startsWith('co-')) return coachAction(a, el, prof);
   // sheets
   if (a === 'sheet-close') return closeSheet();
   if (a === 'tab') { App.view = el.dataset.id; closeSheet(); window.scrollTo(0, 0); render(); return; }
@@ -4414,12 +4715,14 @@ function showBuilderSheet(prof) {
         <button class="cwx-ctl cwx-rest" data-a="cw-rest" data-i="${i}"><span class="lb">Rest</span><b>${U.fmtDur(pe.rest)}</b></button>
         ${i < d.exercises.length - 1 ? `<button class="cwx-ctl cwx-link ${pe.ssWithNext ? 'on' : ''}" data-a="cw-link" data-i="${i}"><span class="lb">Pair</span><b>${pe.ssWithNext ? '🔗 superset' : '+ superset'}</b></button>` : ''}
       </div>
+      ${prof.isCoach ? `<input class="cwx-note" data-i="${i}" placeholder="📝 Note for this exercise — e.g. slow 3s down" maxlength="200" value="${U.esc(pe.note || '')}">` : ''}
     </div>`;
   }).join('');
   showSheet(`
     <h3 style="font-size:19px;font-weight:900">${d.planIdx != null ? 'Edit this plan day' : d.id ? 'Edit workout' : 'Build a workout'}</h3>
     <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? 'Change anything — this overwrites the auto-generated day. Regenerating the plan builds it fresh again.' : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
     <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day 🍑" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
+    ${prof.isCoach ? `<textarea class="ob-input" id="cw-daynote" rows="2" maxlength="300" placeholder="📝 Note for the whole day — shows when they start it" style="width:100%;margin-top:8px;resize:vertical;font-size:13.5px">${U.esc(d.note || '')}</textarea>` : ''}
     <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e">🧱</div>Add your first exercise below.</div>'}</div>
     <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
     <div class="row mt16">
@@ -4428,6 +4731,12 @@ function showBuilderSheet(prof) {
     </div>`);
   const nm = document.getElementById('cw-name');
   if (nm) nm.addEventListener('input', () => { App.cwDraft.name = nm.value; });
+  const dn = document.getElementById('cw-daynote');
+  if (dn) dn.addEventListener('input', () => { App.cwDraft.note = dn.value; });
+  document.querySelectorAll('.cwx-note').forEach(inp => inp.addEventListener('input', () => {
+    const pe = App.cwDraft.exercises[+inp.dataset.i];
+    if (pe) pe.note = inp.value;
+  }));
 }
 
 /* exercise picker for the builder */
@@ -4492,16 +4801,16 @@ function showDayOverrideSheet(prof, wd) {
 
 /* ---------- actions ---------- */
 function customAction(a, el, prof) {
-  if (a === 'cw-new') { App.cwDraft = { id: null, planIdx: null, name: '', exercises: [] }; showBuilderSheet(prof); return; }
+  if (a === 'cw-new') { App.cwDraft = { id: null, planIdx: null, name: '', note: '', exercises: [] }; showBuilderSheet(prof); return; }
   if (a === 'plan-edit-day') {
     const i = +el.dataset.idx;
     const day = prof.plan.days[i]; if (!day) return;
-    App.cwDraft = { id: null, planIdx: i, name: day.name, exercises: JSON.parse(JSON.stringify(day.exercises)) };
+    App.cwDraft = { id: null, planIdx: i, name: day.name, note: day.note || '', exercises: JSON.parse(JSON.stringify(day.exercises)) };
     showBuilderSheet(prof); return;
   }
   if (a === 'cw-edit') {
     const cw = customById(prof, el.dataset.id); if (!cw) return;
-    App.cwDraft = JSON.parse(JSON.stringify({ id: cw.id, name: cw.name, exercises: cw.exercises }));
+    App.cwDraft = JSON.parse(JSON.stringify({ id: cw.id, name: cw.name, note: cw.note || '', exercises: cw.exercises }));
     showBuilderSheet(prof); return;
   }
   if (a === 'cw-add-ex') { showCwPickSheet(prof); return; }
@@ -4546,6 +4855,7 @@ function customAction(a, el, prof) {
       const day = prof.plan.days[d.planIdx];
       day.name = name;
       day.exercises = d.exercises;
+      day.note = (d.note || '').trim();
       day.edited = true;
       saveApp(); closeSheet(); render();
       toast(`“${name}” updated — it’s your day now ✏️`);
@@ -4553,11 +4863,11 @@ function customAction(a, el, prof) {
     }
     if (d.id) {
       const cw = customById(prof, d.id);
-      Object.assign(cw, { name, exercises: d.exercises });
+      Object.assign(cw, { name, exercises: d.exercises, note: (d.note || '').trim() });
       saveApp(); closeSheet(); render();
       toast(`“${name}” updated ✨`);
     } else {
-      const cw = { id: U.uid(), name, exercises: d.exercises, createdAt: U.todayISO() };
+      const cw = { id: U.uid(), name, exercises: d.exercises, note: (d.note || '').trim(), createdAt: U.todayISO() };
       customList(prof).push(cw);
       saveApp(); closeSheet(); render();
       toast(`“${name}” saved 🎉`);
@@ -4798,6 +5108,281 @@ function v2Action(a, el, prof) {
 }
 
 
+/* ============ LiftOff v2.1 — Coach mode UI ============ */
+'use strict';
+
+/* ---------- coach home (replaces Today in a coach workspace) ---------- */
+function renderCoachHome(prof) {
+  const co = prof.coachOf;
+  const pg = co.progress;
+  const status = syncStatusLine(co);
+  let herWeek = '', herPrs = '', latest = '';
+  if (pg) {
+    const wkStart = U.weekKey(U.todayISO());
+    const liftsWk = (pg.logs || []).filter(l => l.date >= wkStart).length;
+    const sportWk = (pg.sportLogs || []).filter(s => s.date >= wkStart).length;
+    const lastLog = (pg.logs || [])[(pg.logs || []).length - 1];
+    latest = lastLog ? `${U.esc(lastLog.dayName)} · ${U.fmtDateShort(lastLog.date)} · ${lastLog.durationMin} min` : 'No workouts shared yet';
+    herWeek = `<div class="sum-stats" style="margin-top:10px">
+      <div class="s"><div class="v">${liftsWk}</div><div class="l">lifts this wk</div></div>
+      <div class="s"><div class="v">${sportWk}</div><div class="l">sport days</div></div>
+      <div class="s"><div class="v">${pg.totals ? pg.totals.workouts : '–'}</div><div class="l">total workouts</div></div>
+    </div>`;
+    const prList = Object.entries(pg.prs || {}).sort((a, b) => b[1].date < a[1].date ? -1 : 1).slice(0, 4);
+    if (prList.length) herPrs = `<div class="card"><h3>${U.esc(pg.name)}’s recent bests</h3><div class="mt8">
+      ${prList.map(([exId, pr]) => `<div class="pr-row"><span class="medal">🏅</span>${U.esc((EX_BY_ID[exId] || {}).name || exId)}
+        <span class="muted" style="margin-left:6px">${U.fmtDateShort(pr.date)}</span>
+        <span class="w">${U.fmtW(pr.w, pg.units)}${U.unitLabel(pg.units)}</span></div>`).join('')}
+    </div></div>`;
+  }
+  const onLatest = pg && co.lastPlanRev && (pg.appliedPlanRev || 0) >= co.lastPlanRev;
+  const planState = !co.lastPlanRev ? 'No plan sent yet — build it in the Plan tab, it sends itself.'
+    : onLatest ? `${U.esc(co.athleteName)} is on your latest plan ✓`
+    : co.pendingPlanPush ? 'Changes ready to send…'
+    : `Sent — waiting for ${U.esc(co.athleteName)} to tap Apply`;
+  return `<div class="screen">
+    <div class="hdr"><div><div class="hi">Coaching ${U.esc(co.athleteName)} 👟</div><div class="sub">${U.esc(status)}</div></div>
+      <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
+    <div class="card hero">
+      <div class="kicker" style="color:rgba(255,255,255,0.85)">THEIR PLAN</div>
+      <h2 style="margin-top:4px">${U.esc(planState)}</h2>
+      <p style="margin-top:6px;opacity:.94;font-size:13.5px">Edit days in the Plan tab or build custom workouts — every save syncs to their phone. Add notes to any exercise or day while editing.</p>
+      <div class="row mt12">
+        <button class="btn onhero sm" data-a="tab" data-id="plan">Edit their plan ✏️</button>
+        <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="co-showcode">Pair code</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row"><h3>💬 Message on their Today screen</h3></div>
+      <textarea class="ob-input" id="co-msg" rows="2" maxlength="500" placeholder="e.g. Big week — focus on slow reps. Proud of you 🧡" style="width:100%;margin-top:10px;resize:vertical;font-size:14px">${U.esc(prof.coachMsg || '')}</textarea>
+      <button class="btn sm dark mt8" data-a="co-msg-save">Send message</button>
+    </div>
+    ${pg ? `<div class="card"><div class="row"><h3>Latest from ${U.esc(pg.name)} ${pg.emoji || ''}</h3></div>
+      <div class="muted mt8">${latest}</div>${herWeek}</div>` : `<div class="card"><h3>Waiting for ${U.esc(co.athleteName)} 💌</h3>
+      <p class="muted mt8">Once they enter your pair code (their Profile tab → “I have a coach code”), their setup, current plan and training history appear here.</p>
+      <button class="btn ghost sm mt8" data-a="co-showcode">Show pair code again</button></div>`}
+    ${herPrs}
+    ${pg && pg.plan && !co.loadedHerPlan ? `<div class="card"><h3>Start from their current plan?</h3>
+      <p class="muted mt8">Pull ${U.esc(pg.name)}’s existing week into your editor so you tweak rather than start from scratch.</p>
+      <button class="btn ghost sm mt8" data-a="co-load-herplan">Load their plan into editor</button></div>` : ''}
+    <div class="card"><h3>Pairing</h3>
+      <p class="muted mt8">Linked to ${U.esc(co.athleteName)}’s phone. Ending it stops sync both ways (their plan and data stay on their phone).</p>
+      <button class="btn danger sm mt8" data-a="co-unpair">End coaching link</button>
+    </div>
+  </div>`;
+}
+
+/* her progress tab, seen from the coach's phone */
+function renderCoachProgress(prof) {
+  const co = prof.coachOf, pg = co.progress;
+  if (!pg) return `<div class="screen"><div class="hdr"><div><div class="hi">Their progress</div><div class="sub">Nothing shared yet</div></div></div>
+    <div class="empty"><div class="e">💌</div>Once ${U.esc(co.athleteName)} pairs up, their lifts, PRs and streaks appear here.</div></div>`;
+  const shim = { logs: pg.logs || [], sportLogs: pg.sportLogs || [], badges: pg.badges || {}, bodyLogs: pg.bodyLogs || [], units: pg.units || 'kg', prs: pg.prs || {} };
+  const wkStart = U.weekKey(U.todayISO());
+  const liftsWk = shim.logs.filter(l => l.date >= wkStart).length;
+  const volWk = shim.logs.filter(l => l.date >= wkStart).reduce((t, l) => t + l.entries.reduce((v, e) => v + e.sets.reduce((x, s) => x + (s.w || 0) * ((EX_BY_ID[e.exId] || {}).timed ? 0 : s.reps), 0), 0), 0);
+  const prCount = Object.keys(shim.prs).length;
+  const sessions = shim.logs.slice(-6).reverse();
+  return `<div class="screen">
+    <div class="hdr"><div><div class="hi">${U.esc(pg.name)}’s progress</div><div class="sub">shared ${co.progressAt ? U.fmtDateShort(String(co.progressAt).slice(0, 10)) : ''} · ${U.esc(syncStatusLine(co))}</div></div>
+      <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
+    <div class="tiles">
+      <div class="tile"><div class="lb">Lifts this week</div><div class="v">${liftsWk}</div></div>
+      <div class="tile"><div class="lb">Volume this week</div><div class="v">${U.compact(volWk)}<small> kg</small></div></div>
+      <div class="tile"><div class="lb">Personal records</div><div class="v">${prCount}</div></div>
+      <div class="tile"><div class="lb">Total workouts</div><div class="v">${pg.totals ? pg.totals.workouts : shim.logs.length}</div></div>
+    </div>
+    ${sessions.length ? `<div class="card"><h3>Recent sessions</h3><div class="mt8">
+      ${sessions.map(l => {
+        const top = l.entries.map(e => { const ex = EX_BY_ID[e.exId]; const w = Math.max(...e.sets.map(s => s.w || 0), 0); return ex && w > 0 ? `${ex.name} ${U.fmtW(w, shim.units)}` : null; }).filter(Boolean).slice(0, 2).join(' · ');
+        return `<div class="pr-row"><span class="medal">🏋️</span>${U.esc(l.dayName)}<span class="muted" style="margin-left:6px">${U.fmtDateShort(l.date)}</span><span class="w" style="font-size:12px">${U.esc(top || l.durationMin + ' min')}</span></div>`;
+      }).join('')}
+    </div></div>` : ''}
+    ${heatmapCardHtml(shim)}
+    ${badgesCardHtml(shim)}
+  </div>`;
+}
+
+/* ---------- sheets: create / pair code / enter code ---------- */
+function showCoachCreateSheet(prof) {
+  showSheet(`<h3 style="font-size:19px;font-weight:900">👟 Coach someone</h3>
+    <p class="muted mt8" style="margin-bottom:10px">You build and update their plan from this phone; they get it on theirs, along with your notes. They'll see a code to enter once.</p>
+    <label class="muted" style="font-size:12.5px;font-weight:700">Their name</label>
+    <input class="ob-input" id="co-ath-name" placeholder="e.g. Amy" maxlength="20" autocomplete="off" style="margin-top:4px">
+    <label class="muted" style="font-size:12.5px;font-weight:700;display:block;margin-top:10px">Your name (how it appears to them)</label>
+    <input class="ob-input" id="co-my-name" value="${U.esc(prof.name)}" maxlength="20" autocomplete="off" style="margin-top:4px">
+    <button class="btn primary block mt16" data-a="co-create">Create coaching link →</button>`);
+}
+
+function showPairCodeSheet(co) {
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Their code 💌</h3>
+    <p class="muted mt8">Send this to ${U.esc(co.athleteName)} however you like. In their LiftOff: <b>Profile → I have a coach code</b>.</p>
+    <div class="paircode" id="co-code">${U.esc(fmtPairKey(co.key))}</div>
+    <div class="row mt12">
+      <button class="btn ghost" style="flex:1" data-a="co-copy">Copy</button>
+      ${navigator.share ? '<button class="btn primary" style="flex:1" data-a="co-sharecode">Share…</button>' : ''}
+    </div>
+    <p class="muted mt12" style="font-size:12px">Anyone with this code can read the plan and progress you two share — treat it like a key. You can always end the link from the coach screen.</p>
+    <button class="btn ghost block mt8" data-a="sheet-close">Done</button>`);
+}
+
+function showEnterCodeSheet() {
+  showSheet(`<h3 style="font-size:19px;font-weight:900">💌 I have a coach code</h3>
+    <p class="muted mt8" style="margin-bottom:10px">Paste the code your coach sent you. Pairing lets them update your plan, leave you notes, and see your logged training — you can unpair any time.</p>
+    <input class="ob-input" id="co-pair-key" placeholder="LIFT-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" autocapitalize="characters" style="font-family:ui-monospace,monospace;letter-spacing:1px">
+    <button class="btn primary block mt16" data-a="co-pair">Pair up 🤝</button>`);
+}
+
+/* ---------- her Today cards ---------- */
+function coachPlanCardHtml(prof) {
+  const p = prof.pendingCoachPlan;
+  if (!p || App._planSnooze === p.rev) return '';
+  const doc = p.doc || {};
+  const names = (doc.days || []).map(d => d.name).slice(0, 4).join(' · ');
+  return `<div class="card" style="background:var(--grad-violet);color:#fff">
+    <div class="kicker" style="color:rgba(255,255,255,0.85)">FROM ${U.esc((doc.coach || 'YOUR COACH').toUpperCase())}</div>
+    <h3 style="color:#fff;margin-top:4px">💌 New plan for you</h3>
+    <p class="mt8" style="font-size:13.5px;opacity:.95">${(doc.days || []).length} ${U.plural((doc.days || []).length, 'day')}: ${U.esc(names)}${doc.msg ? ` — “${U.esc(doc.msg.slice(0, 80))}${doc.msg.length > 80 ? '…' : ''}”` : ''}</p>
+    <p class="mt8" style="font-size:12px;opacity:.85">Applying replaces your current week — all your logged lifts, PRs and weights stay exactly as they are.</p>
+    <div class="row mt12">
+      <button class="btn onhero sm" style="color:#6B3FD9" data-a="co-apply-plan">Apply it 🚀</button>
+      <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="co-apply-later">Later</button>
+    </div>
+  </div>`;
+}
+
+function coachMsgCardHtml(prof) {
+  if (!prof.coachMsg || prof.coachMsgSeen) return '';
+  return `<div class="card coach-card" style="border:1.5px solid #E7DEFF;background:#FBF9FF">
+    <div class="ic">💬</div>
+    <div style="flex:1"><div class="tt">${U.esc(prof.coachName || 'Your coach')} says</div>
+    <div class="tx">${U.esc(prof.coachMsg)}</div>
+    <button class="btn ghost sm mt8" data-a="co-dismiss-msg">Got it 🧡</button></div>
+  </div>`;
+}
+
+/* ---------- dispatch ---------- */
+function coachAction(a, el, prof) {
+  if (a === 'co-start') { showCoachCreateSheet(prof); return true; }
+  if (a === 'co-create') {
+    const athlete = (document.getElementById('co-ath-name').value || '').trim();
+    const myName = (document.getElementById('co-my-name').value || '').trim() || prof.name;
+    if (!athlete) { toast('Pop their name in first 🙂'); return true; }
+    if (navigator.onLine === false) { toast('Need internet to set up the link — try again when online 📶'); return true; }
+    const key = makePairKey();
+    const btn = el; btn.disabled = true; btn.textContent = 'Creating…';
+    syncRpc('lo_create_pair', { p_key: key, p_coach: myName, p_athlete: athlete }).then(ok => {
+      if (!ok) { btn.disabled = false; btn.textContent = 'Create coaching link →'; toast('Hmm, that didn’t work — try again'); return; }
+      const id = U.uid();
+      App.data.profiles[id] = {
+        id, name: `${athlete} (coaching)`, emoji: '👟', createdAt: U.todayISO(), planCount: 0,
+        units: 'kg', logs: [], sportLogs: [], exState: {}, prs: {}, customWorkouts: [], customMap: {},
+        exPrefs: {}, badges: {}, bodyLogs: [], barKg: 20, isCoach: true,
+        coachDisplayName: myName, coachMsg: '',
+        coachOf: { key, athleteName: athlete, pendingPlanPush: false, progressRev: 0 },
+        quiz: { goal: 'muscle', experience: 'beginner', daysPerWeek: 3, sessionMinutes: 60,
+          equipment: ['barbell', 'dumbbell', 'machine', 'cable', 'bodyweight', 'bench'], focus: [],
+          athleteType: 'gym', sportLabel: '', weekSchedule: scheduleFromDays(3), videoPref: 'auto' },
+      };
+      migrateProfile(App.data.profiles[id]);
+      App.data.profiles[id].plan = generatePlan(App.data.profiles[id]);
+      App.data.activeProfileId = id;
+      App.view = 'today';
+      saveApp(); render();
+      showPairCodeSheet(App.data.profiles[id].coachOf);
+    }).catch(() => { btn.disabled = false; btn.textContent = 'Create coaching link →'; toast('Couldn’t reach the sync service — check your connection 📶'); });
+    return true;
+  }
+  if (a === 'co-showcode') { showPairCodeSheet(prof.coachOf); return true; }
+  if (a === 'co-copy') {
+    const txt = `You've got a coach! 🧡 Open LiftOff → Profile → "I have a coach code" and enter:\n${fmtPairKey((prof.coachOf || {}).key || '')}\n${location.origin.startsWith('http') ? location.origin + location.pathname : ''}`;
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copied — send it over 📋'))
+      .catch(() => { const c = document.getElementById('co-code'); if (c) { const r = document.createRange(); r.selectNodeContents(c); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } toast('Select + copy the code above'); });
+    return true;
+  }
+  if (a === 'co-sharecode') {
+    navigator.share({ title: 'LiftOff coach code', text: `You've got a coach! 🧡 Open LiftOff → Profile → "I have a coach code" and enter: ${fmtPairKey((prof.coachOf || {}).key || '')}` }).catch(() => {});
+    return true;
+  }
+  if (a === 'co-pair-open') { showEnterCodeSheet(); return true; }
+  if (a === 'co-pair') {
+    const key = normalizePairKey(document.getElementById('co-pair-key').value);
+    if (!key) { toast('That code doesn’t look complete — check it and try again 🔍'); return true; }
+    if (navigator.onLine === false) { toast('Need internet to pair — try again when online 📶'); return true; }
+    const btn = el; btn.disabled = true; btn.textContent = 'Checking…';
+    syncRpc('lo_revs', { p_key: key }).then(revs => {
+      if (!revs) { btn.disabled = false; btn.textContent = 'Pair up 🤝'; toast('Code not recognised — double-check with your coach'); return; }
+      prof.coachSync = { key, coachName: revs.coach || 'Your coach', appliedPlanRev: 0, pendingProgress: true };
+      saveApp(); closeSheet(); render();
+      toast(`Paired with ${revs.coach || 'your coach'} 🤝`);
+      syncTick(true);
+    }).catch(() => { btn.disabled = false; btn.textContent = 'Pair up 🤝'; toast('Couldn’t reach the sync service — check your connection 📶'); });
+    return true;
+  }
+  if (a === 'co-apply-plan') {
+    const p = prof.pendingCoachPlan;
+    if (p && applyPlanDoc(prof, p.doc, p.rev)) {
+      prof.pendingCoachPlan = null;
+      if (prof.coachSync) prof.coachSync.pendingProgress = true; // ack the rev back
+      saveApp(); render();
+      Confetti.burst(90);
+      toast(`New plan from ${prof.coachName || 'your coach'} is on 🚀`);
+      syncTick(true);
+    } else { toast('Hmm, that plan looked empty — ask your coach to resend'); }
+    return true;
+  }
+  if (a === 'co-apply-later') { App._planSnooze = prof.pendingCoachPlan ? prof.pendingCoachPlan.rev : 0; render(); return true; }
+  if (a === 'co-dismiss-msg') { prof.coachMsgSeen = true; saveApp(); render(); return true; }
+  if (a === 'co-msg-save') {
+    const t = document.getElementById('co-msg');
+    prof.coachMsg = (t.value || '').slice(0, 500);
+    coachMaybeDirty(prof); saveApp(); render();
+    toast(prof.coachMsg ? 'Message will appear on their Today screen 💬' : 'Message cleared');
+    return true;
+  }
+  if (a === 'co-load-herplan') {
+    const pg = prof.coachOf && prof.coachOf.progress;
+    if (pg && pg.plan && pg.plan.days && pg.plan.days.length) {
+      prof.plan.days = pg.plan.days.map(d => ({ name: d.name, focus: d.focus || null, note: d.note || '',
+        exercises: (d.exercises || []).map(sanitizePe).filter(Boolean) })).filter(d => d.exercises.length);
+      prof.plan.daysPerWeek = pg.plan.daysPerWeek || prof.plan.days.length;
+      prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+      prof.coachOf.loadedHerPlan = true;
+      prof.coachOf.lastPushedJson = JSON.stringify(buildPlanDoc(prof)); // loading isn't a change to send back
+      saveApp(); render();
+      toast(`${pg.name}’s current plan loaded — tweak away ✏️`);
+    }
+    return true;
+  }
+  if (a === 'co-sync-now') {
+    toast('Syncing… ↻');
+    syncTick(true).then(() => { render(); const t = prof.coachOf || prof.coachSync; toast(t && t.lastErr ? 'Couldn’t reach sync — will keep trying 📶' : 'Up to date ✓'); });
+    return true;
+  }
+  if (a === 'co-unpair') {
+    const isCoach = !!prof.isCoach;
+    showConfirm(isCoach ? 'End coaching link?' : 'Unpair from your coach?',
+      isCoach ? 'Sync stops both ways and the shared data is deleted. Their app keeps working with the last plan you sent.'
+              : 'Your coach will stop getting your progress and can no longer update your plan. Your current plan and all your data stay.',
+      'Keep it', isCoach ? 'End link' : 'Unpair', ok => {
+        if (ok) return;
+        const key = isCoach ? prof.coachOf.key : prof.coachSync.key;
+        syncRpc('lo_delete_pair', { p_key: key }).catch(() => {});
+        if (isCoach) {
+          delete App.data.profiles[prof.id];
+          App.data.activeProfileId = Object.keys(App.data.profiles)[0] || null;
+        } else {
+          prof.coachSync = null; prof.pendingCoachPlan = null;
+        }
+        saveApp(); render();
+        toast(isCoach ? 'Coaching link ended' : 'Unpaired — it’s all yours again');
+      });
+    return true;
+  }
+  return false;
+}
+
+
 /* ============ LiftOff — boot ============ */
 'use strict';
 
@@ -4834,6 +5419,13 @@ window.addEventListener('beforeunload', () => { if (_saveT) { clearTimeout(_save
 
 loadApp();
 render();
+// coach sync: check on boot, on regaining focus/network, and gently in the background
+if (typeof syncTick === 'function') {
+  setTimeout(() => syncTick(true), 900);
+  window.addEventListener('online', () => syncTick(true));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncTick(); });
+  setInterval(() => { if (document.visibilityState === 'visible') syncTick(); }, 300000);
+}
 if (App.justUpdated) setTimeout(() => toast('LiftOff updated to v' + APP_VERSION + ' — all your data came along ✨', 3200), 600);
 
 </script>

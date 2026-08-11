@@ -3138,6 +3138,7 @@ function migrateProfile(p) {
   if (!p.quiz.videoPref) p.quiz.videoPref = 'auto';
   if (!p.customWorkouts) p.customWorkouts = [];
   if (!p.savedPlans) p.savedPlans = [];
+  if (!p.flags) p.flags = {};
   if (!p.customMap) p.customMap = {};
   if (!p.exPrefs) p.exPrefs = {};
   if (!p.badges) p.badges = {};
@@ -3914,7 +3915,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.2.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3932,6 +3933,7 @@ function loadApp() {
   App.data = Store.load() || defaultData();
   App.storeRestored = Store.restored;
   if (!App.data.profiles) App.data.profiles = {};
+  if (!App.data.coachLib) App.data.coachLib = { weeks: [], days: [] };
   const prevVer = App.data.appVersion;
   const updating = prevVer !== APP_VERSION && Object.keys(App.data.profiles).length > 0;
   if (updating) {
@@ -4040,6 +4042,55 @@ function deleteSavedPlan(prof, id) {
   prof.savedPlans = savedPlans(prof).filter(x => x.id !== id);
   saveApp();
 }
+
+/* ---- coach template library (shared across all clients; lives on App.data, never syncs to athletes) ---- */
+function coachLib() {
+  if (!App.data.coachLib) App.data.coachLib = { weeks: [], days: [] };
+  App.data.coachLib.weeks = App.data.coachLib.weeks || [];
+  App.data.coachLib.days = App.data.coachLib.days || [];
+  return App.data.coachLib;
+}
+function saveWeekTemplate(prof, name) {
+  if (!prof.plan) return null;
+  const e = {
+    id: U.uid(), name: (name || '').trim() || prof.plan.splitName || 'Week template', createdAt: U.todayISO(),
+    splitName: prof.plan.splitName, goal: prof.plan.goal, daysPerWeek: prof.plan.daysPerWeek,
+    days: JSON.parse(JSON.stringify(prof.plan.days)),
+    weekSchedule: JSON.parse(JSON.stringify(prof.quiz.weekSchedule || {})),
+  };
+  coachLib().weeks.unshift(e); saveApp(); return e;
+}
+function applyWeekTemplate(prof, id) {
+  const w = coachLib().weeks.find(x => x.id === id); if (!w) return false;
+  prof.plan = prof.plan || {};
+  prof.plan.days = JSON.parse(JSON.stringify(w.days));
+  if (w.splitName) prof.plan.splitName = w.splitName;
+  if (w.goal) prof.plan.goal = w.goal;
+  prof.plan.daysPerWeek = w.daysPerWeek || w.days.length;
+  if (w.weekSchedule && Object.keys(w.weekSchedule).length) prof.quiz.weekSchedule = JSON.parse(JSON.stringify(w.weekSchedule));
+  prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+  prof.plan.nextDayIdx = 0;
+  saveApp(); // coachMaybeDirty (in saveApp) pushes the new week to the client's phone
+  return true;
+}
+function deleteWeekTemplate(id) { coachLib().weeks = coachLib().weeks.filter(x => x.id !== id); saveApp(); }
+
+function saveDayTemplate(name, day) {
+  if (!day || !day.exercises || !day.exercises.length) return null;
+  const e = {
+    id: U.uid(), name: (name || '').trim() || day.name || 'Day template', createdAt: U.todayISO(),
+    note: day.note || '', exercises: JSON.parse(JSON.stringify(day.exercises)),
+  };
+  coachLib().days.unshift(e); saveApp(); return e;
+}
+function insertDayTemplate(prof, id) { // materialise a saved day into this client's custom workouts (ready to assign)
+  const t = coachLib().days.find(x => x.id === id); if (!t) return null;
+  const cw = { id: U.uid(), name: t.name, note: t.note || '', exercises: JSON.parse(JSON.stringify(t.exercises)), createdAt: U.todayISO() };
+  (prof.customWorkouts || (prof.customWorkouts = [])).push(cw);
+  saveApp();
+  return cw.id;
+}
+function deleteDayTemplate(id) { coachLib().days = coachLib().days.filter(x => x.id !== id); saveApp(); }
 
 /* which plan day is next? rotate through days by count of logs of this plan */
 function nextPlanDay(prof) {
@@ -5211,6 +5262,7 @@ function renderPlanView(prof) {
           <div class="day-num">${i + 1}</div>
           <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}</h3>
           <div class="focus">${d.focus.map(f => GROUP_LABELS[f] || f).join(' · ')} · ~${estMinutes(d)} min</div></div>
+          ${prof.isCoach ? `<button class="iconbtn" data-a="tpl-save-day" data-idx="${i}" title="Save this day to my templates">🔖</button>` : ''}
           <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day">✏️</button>
           ${prof.isCoach ? '' : `<button class="btn sm dark" data-a="start-workout" data-idx="${i}">Start</button>`}
         </div>
@@ -5236,12 +5288,35 @@ function renderPlanView(prof) {
             <div class="meta">${c.exercises.length} exercises · ~${estMinutes(c)} min${days.length ? ' · ' + days.join(', ') : ''}</div></span>
             <button class="btn sm ghost" data-a="cw-assign-open" data-id="${c.id}">Days</button>
             <button class="btn sm ghost" data-a="cw-edit" data-id="${c.id}">Edit</button>
-            <button class="btn sm dark" data-a="start-custom" data-id="${c.id}">Start</button>
+            ${prof.isCoach ? `<button class="btn sm ghost" data-a="tpl-save-cw" data-id="${c.id}" title="Save to my templates">🔖</button>` : `<button class="btn sm dark" data-a="start-custom" data-id="${c.id}">Start</button>`}
           </div>`;
         }).join('')}</div>` :
       `<p class="muted mt8" style="line-height:1.5">Fancy full control? Build a workout from scratch — pick the exercises, sets and reps — then drop it onto any day of your week. Progression still tracks everything.</p>`}
     </div>
-    ${prof.isCoach ? '' : `<div class="card">
+    ${coachOf ? (() => {
+      const lib = coachLib();
+      return `<div class="card">
+      <div class="row"><h3>My templates</h3><span class="spacer"></span><button class="btn sm dark" data-a="tpl-save-week">Save week</button></div>
+      <p class="muted mt8" style="font-size:12px;line-height:1.5">Bank ${U.esc(coachOf.athleteName)}’s weeks and days here, then drop them onto any client — build once, reuse everywhere.</p>
+      ${lib.weeks.length ? `<div class="kicker" style="margin:14px 0 6px">Weeks</div>
+        ${lib.weeks.map(w => `<div class="prof-row">
+          <span class="em" style="border-radius:14px;font-size:18px">🗂️</span>
+          <span style="flex:1;min-width:0"><div class="nm">${U.esc(w.name)}</div>
+          <div class="meta">${w.days.length} ${U.plural(w.days.length, 'day')} · ${U.fmtDateShort(w.createdAt)}</div></span>
+          <button class="btn sm ghost" data-a="tpl-apply-week" data-id="${w.id}">Apply</button>
+          <button class="btn sm ghost" style="color:#C0302C" data-a="tpl-del-week" data-id="${w.id}">✕</button>
+        </div>`).join('')}` : ''}
+      ${lib.days.length ? `<div class="kicker" style="margin:14px 0 6px">Days</div>
+        ${lib.days.map(dt => `<div class="prof-row">
+          <span class="em" style="border-radius:14px;font-size:18px">🔖</span>
+          <span style="flex:1;min-width:0"><div class="nm">${U.esc(dt.name)}</div>
+          <div class="meta">${dt.exercises.length} ${U.plural(dt.exercises.length, 'exercise')}${dt.note ? ' · note' : ''}</div></span>
+          <button class="btn sm ghost" data-a="tpl-insert-day" data-id="${dt.id}">Insert</button>
+          <button class="btn sm ghost" style="color:#C0302C" data-a="tpl-del-day" data-id="${dt.id}">✕</button>
+        </div>`).join('')}` : ''}
+      ${!lib.weeks.length && !lib.days.length ? `<p class="muted mt12" style="line-height:1.5">Tap <b>Save week</b> above, or the 🔖 on any day, to start your library.</p>` : ''}
+    </div>`;
+    })() : `<div class="card">
       <div class="row"><h3>Saved plans</h3><span class="spacer"></span><button class="btn sm dark" data-a="plan-save">Save this week</button></div>
       ${savedPlans(prof).length ? `<div class="mt8">
         ${savedPlans(prof).map(sp => `<div class="prof-row">
@@ -5586,6 +5661,65 @@ function dispatch(e) {
     const sp = savedPlans(prof).find(x => x.id === el.dataset.id); if (!sp) return;
     showConfirm('Delete this saved plan?', `“${U.esc(sp.name)}” will be removed. It only deletes the saved template — your current week and all your data stay.`, 'Keep it', 'Delete', ok => {
       if (!ok) { deleteSavedPlan(prof, sp.id); render(); toast('Saved plan deleted'); }
+    });
+    return;
+  }
+  // ---- coach template library ----
+  if (a === 'tpl-save-week') {
+    showSheet(`<h3 style="font-size:19px;font-weight:900">Save this week to templates</h3>
+      <p class="muted mt8" style="margin-bottom:10px">Name it — then apply it to ${U.esc((prof.coachOf || {}).athleteName || 'any client')} or anyone else, any time.</p>
+      <input class="ob-input" id="tpl-name" placeholder="e.g. Beginner full-body 3-day" maxlength="34" autocomplete="off" value="${U.esc((prof.plan && prof.plan.splitName) || '')}">
+      <button class="btn primary block mt16" data-a="tpl-save-week-go">Save week 🗂️</button>`);
+    setTimeout(() => { const i = document.getElementById('tpl-name'); if (i) { i.focus(); i.select(); } }, 60);
+    return;
+  }
+  if (a === 'tpl-save-week-go') {
+    const e = saveWeekTemplate(prof, (document.getElementById('tpl-name') || {}).value || '');
+    closeSheet(); render(); toast(e ? `“${e.name}” banked 🗂️` : 'Nothing to save yet');
+    return;
+  }
+  if (a === 'tpl-apply-week') {
+    const w = coachLib().weeks.find(x => x.id === el.dataset.id); if (!w) return;
+    showConfirm(`Apply “${w.name}”?`, `This replaces ${U.esc((prof.coachOf || {}).athleteName || 'the client')}’s current week and syncs to their phone. Their logged history and records stay untouched.`, 'Keep current', 'Apply it', ok => {
+      if (!ok) { applyWeekTemplate(prof, w.id); render(); toast(`“${w.name}” applied — syncing to ${U.esc((prof.coachOf || {}).athleteName || 'client')} ↗`); }
+    });
+    return;
+  }
+  if (a === 'tpl-del-week') {
+    const w = coachLib().weeks.find(x => x.id === el.dataset.id); if (!w) return;
+    showConfirm('Delete week template?', `“${U.esc(w.name)}” leaves your library. Clients already on it keep their plan.`, 'Keep it', 'Delete', ok => {
+      if (!ok) { deleteWeekTemplate(w.id); render(); toast('Template deleted'); }
+    });
+    return;
+  }
+  if (a === 'tpl-save-day' || a === 'tpl-save-cw') {
+    const src = a === 'tpl-save-day' ? prof.plan.days[+el.dataset.idx] : customById(prof, el.dataset.id);
+    if (!src) return;
+    App._tplDaySrc = JSON.parse(JSON.stringify({ name: src.name, note: src.note || '', exercises: src.exercises }));
+    showSheet(`<h3 style="font-size:19px;font-weight:900">Save day to templates</h3>
+      <p class="muted mt8" style="margin-bottom:10px">A reusable day you can drop onto any client — ${src.exercises.length} ${U.plural(src.exercises.length, 'exercise')}.</p>
+      <input class="ob-input" id="tpl-name" placeholder="e.g. Glute-focus lower" maxlength="34" autocomplete="off" value="${U.esc(src.name || '')}">
+      <button class="btn primary block mt16" data-a="tpl-save-day-go">Save day 🔖</button>`);
+    setTimeout(() => { const i = document.getElementById('tpl-name'); if (i) { i.focus(); i.select(); } }, 60);
+    return;
+  }
+  if (a === 'tpl-save-day-go') {
+    const src = App._tplDaySrc; if (!src) { closeSheet(); return; }
+    src.name = (document.getElementById('tpl-name') || {}).value || src.name;
+    const e = saveDayTemplate(src.name, src);
+    App._tplDaySrc = null; closeSheet(); render();
+    toast(e ? `“${e.name}” banked 🔖` : 'Add an exercise first');
+    return;
+  }
+  if (a === 'tpl-insert-day') {
+    const cwId = insertDayTemplate(prof, el.dataset.id);
+    if (cwId) { render(); toast('Added to their workouts — pick which days ↓'); setTimeout(() => showAssignSheet(prof, cwId), 300); }
+    return;
+  }
+  if (a === 'tpl-del-day') {
+    const dt = coachLib().days.find(x => x.id === el.dataset.id); if (!dt) return;
+    showConfirm('Delete day template?', `“${U.esc(dt.name)}” leaves your library. Days already dropped onto clients stay.`, 'Keep it', 'Delete', ok => {
+      if (!ok) { deleteDayTemplate(dt.id); render(); toast('Template deleted'); }
     });
     return;
   }

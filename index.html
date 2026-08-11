@@ -713,6 +713,11 @@ button.pw-day { font-family: inherit; }
 .cat-head .ic { font-size: 30px; }
 .cat-head .nm { font-family: var(--font-display); font-weight: 800; font-size: 22px; letter-spacing: -0.01em; }
 
+/* v3.3 — program/week chip */
+.prog-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-d); font-weight: 800;
+  font-size: 12.5px; letter-spacing: -0.01em; padding: 6px 12px; border-radius: 999px;
+  background: var(--tint); color: var(--ink); border: 1px solid var(--line); }
+
 </style>
 </head>
 <body>
@@ -3117,6 +3122,33 @@ function workoutForWeekday(prof, wd) {
   return day ? { type: 'plan', idx, name: day.name, exercises: day.exercises } : null;
 }
 
+/* ---- program & week tracker ---- */
+function programOf(prof) {
+  if (!prof.program || typeof prof.program.n !== 'number') prof.program = { n: 1, start: U.weekKey((prof.createdAt) || U.todayISO()) };
+  return prof.program;
+}
+function programWeek(prof) {
+  const pr = programOf(prof);
+  const start = U.weekKey(pr.start || U.todayISO());
+  const now = U.weekKey(U.todayISO());
+  return Math.max(1, Math.round(U.daysBetween(start, now) / 7) + 1);
+}
+function startNewProgram(prof) {
+  const pr = programOf(prof);
+  prof.program = { n: (pr.n || 1) + 1, start: U.weekKey(U.todayISO()) };
+  return prof.program;
+}
+function programLabel(prof) {
+  const pr = programOf(prof);
+  return `Program ${pr.n} · Week ${programWeek(prof)}`;
+}
+function programLabelFrom(pr) {
+  if (!pr || typeof pr.n !== 'number') return '';
+  const start = U.weekKey(pr.start || U.todayISO());
+  const wk = Math.max(1, Math.round(U.daysBetween(start, U.weekKey(U.todayISO())) / 7) + 1);
+  return `Program ${pr.n} · Week ${wk}`;
+}
+
 function sportLabelFor(prof, act) {
   if (act === 'sport') return (prof.quiz.sportLabel || '').trim() || 'Match / training';
   return ACTIVITIES[act] ? ACTIVITIES[act].verb : act;
@@ -3139,6 +3171,7 @@ function migrateProfile(p) {
   if (!p.customWorkouts) p.customWorkouts = [];
   if (!p.savedPlans) p.savedPlans = [];
   if (!p.flags) p.flags = {};
+  if (!p.program || typeof p.program.n !== 'number') p.program = { n: 1, start: U.weekKey(p.createdAt || U.todayISO()) };
   if (!p.customMap) p.customMap = {};
   if (!p.exPrefs) p.exPrefs = {};
   if (!p.badges) p.badges = {};
@@ -3586,6 +3619,7 @@ function buildPlanDoc(prof) { // coach workspace → athlete
       exercises: (c.exercises || []).map(packPe),
     })),
     customMap: prof.customMap || {},
+    program: prof.program || null,
   };
 }
 
@@ -3613,6 +3647,9 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
     prof.customMap = prof.customMap || {};
     const validIds = new Set(prof.customWorkouts.map(c => c.id));
     for (const [wd, id] of Object.entries(doc.customMap)) if (validIds.has(id)) prof.customMap[wd] = id;
+  }
+  if (doc.program && typeof doc.program.n === 'number' && doc.program.n > ((prof.program && prof.program.n) || 0)) {
+    prof.program = { n: doc.program.n, start: doc.program.start || U.weekKey(U.todayISO()) };
   }
   prof.coachName = doc.coach || 'Your coach';
   const newMsg = doc.msg || '';
@@ -3654,6 +3691,7 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
     bodyLogs: (prof.bodyLogs || []).slice(-20),
     badges: prof.badges || {},
     totals: { workouts: (prof.logs || []).length, since: prof.createdAt },
+    program: prof.program || null,
     appliedPlanRev: prof.coachSync ? (prof.coachSync.appliedPlanRev || 0) : 0,
   };
 }
@@ -3915,7 +3953,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.2.0';
+const APP_VERSION = '3.3.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -3986,7 +4024,7 @@ function createProfile(quiz) {
       sessionMinutes: quiz.sessionMinutes, equipment: quiz.equipment, focus: quiz.focus || [],
       videoPref: quiz.videoPref || 'auto',
     },
-    planCount: 0, plan: null, logs: [], sportLogs: [], exState: {}, prs: {}, flags: {},
+    planCount: 0, plan: null, logs: [], sportLogs: [], exState: {}, prs: {}, flags: {}, program: { n: 1, start: U.weekKey(U.todayISO()) },
     customWorkouts: [], customMap: {}, savedPlans: [], activeWorkout: null,
   };
   prof.plan = generatePlan(prof);
@@ -4002,6 +4040,7 @@ function regeneratePlan(prof, newQuiz) {
   prof.planCount = (prof.planCount || 0) + 1;
   prof.plan = generatePlan(prof);
   prof.flags.deloadSuggested = false;
+  startNewProgram(prof);
   saveApp();
 }
 
@@ -4034,6 +4073,7 @@ function loadSavedPlan(prof, id) {
   if (sp.weekSchedule && Object.keys(sp.weekSchedule).length) prof.quiz.weekSchedule = JSON.parse(JSON.stringify(sp.weekSchedule));
   prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
   prof.plan.nextDayIdx = 0;
+  startNewProgram(prof);
   // logs, PRs, exState, records all untouched — this only swaps the template
   saveApp();
   return true;
@@ -4070,7 +4110,8 @@ function applyWeekTemplate(prof, id) {
   if (w.weekSchedule && Object.keys(w.weekSchedule).length) prof.quiz.weekSchedule = JSON.parse(JSON.stringify(w.weekSchedule));
   prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
   prof.plan.nextDayIdx = 0;
-  saveApp(); // coachMaybeDirty (in saveApp) pushes the new week to the client's phone
+  startNewProgram(prof);
+  saveApp(); // coachMaybeDirty (in saveApp) pushes the new week + program bump to the client
   return true;
 }
 function deleteWeekTemplate(id) { coachLib().weeks = coachLib().weeks.filter(x => x.id !== id); saveApp(); }
@@ -4595,7 +4636,10 @@ function renderToday(prof) {
         <div class="sub">${wk.done >= wk.target ? 'Lifting week complete — you legend!' : `${wk.done} of ${wk.target} lifts banked this week`}</div></div>
       <button class="avatar" data-a="tab" data-id="profile">${prof.emoji}</button>
     </div>
-    ${weeks >= 2 ? `<div style="margin-bottom:12px"><span class="streak-chip">🔥 ${weeks}-week streak</span></div>` : ''}
+    <div style="margin-bottom:12px;display:flex;gap:7px;flex-wrap:wrap">
+      <span class="prog-chip">📓 ${U.esc(programLabel(prof))}</span>
+      ${weeks >= 2 ? `<span class="streak-chip">🔥 ${weeks}-week streak</span>` : ''}
+    </div>
     ${coachPlanCardHtml(prof)}
     ${hero}
     ${coachMsgCardHtml(prof)}
@@ -6455,6 +6499,8 @@ function renderCoachHome(prof) {
     ${myProf ? `<button class="switchback" data-a="co-myprofile">↩ Back to my training (${U.esc(myProf.name)})</button>` : ''}
     <div class="hdr"><div><div class="hi">Coaching ${U.esc(co.athleteName)}</div><div class="sub">${U.esc(status)}</div></div>
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
+    ${(() => { const pgp = pg && pg.program; const p = pgp && typeof pgp.n === 'number' ? pgp : prof.program;
+      return p ? `<div style="margin-bottom:12px"><span class="prog-chip">📓 ${U.esc(programLabelFrom(p))}</span></div>` : ''; })()}
     <div class="card hero">
       <div class="kicker" style="color:rgba(255,255,255,0.85)">THEIR PLAN</div>
       <h2 style="margin-top:4px">${U.esc(planState)}</h2>
@@ -6906,6 +6952,16 @@ window.addEventListener('beforeunload', () => { if (_saveT) { clearTimeout(_save
 loadApp();
 render();
 if (App.workout && App.workout.restEndTs && typeof resumeRest === 'function') resumeRest();
+
+// keep the day current: if the app is left open across midnight, refresh Today
+// when it regains focus (and hourly) so it never shows a stale/completed day
+let _dayStamp = U.todayISO();
+function refreshIfNewDay() {
+  const now = U.todayISO();
+  if (now !== _dayStamp && !App.workout) { _dayStamp = now; render(); }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshIfNewDay(); });
+setInterval(refreshIfNewDay, 15 * 60 * 1000);
 // coach sync: check on boot, on regaining focus/network, and gently in the background
 if (typeof syncTick === 'function') {
   setTimeout(() => syncTick(true), 900);
@@ -6917,9 +6973,25 @@ if (App.justUpdated) setTimeout(() => toast('LiftOff updated to v' + APP_VERSION
 
 </script>
 <script>
-// PWA: offline shell + home-screen install (https only; harmless to skip elsewhere)
+// PWA: offline shell + home-screen install + seamless auto-update (https only)
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  // when a freshly-installed SW takes control, refresh once so the running app
+  // becomes the new version (skip the very first install, which is already fresh)
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded || !hadController) return;
+    reloaded = true;
+    location.reload();
+  });
+  addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      const check = () => { reg.update().catch(() => {}); };
+      check();                                    // check for a new version on launch
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+      setInterval(check, 30 * 60 * 1000);         // and every 30 min while open
+    }).catch(() => {});
+  });
 }
 </script>
 </body>

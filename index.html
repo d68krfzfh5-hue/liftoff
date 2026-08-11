@@ -400,12 +400,18 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 
 /* ---------- custom workout builder ---------- */
 .cwx { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--rs); padding: 10px 12px; margin-bottom: 8px; }
-.cwx-controls { display: grid; grid-template-columns: 1fr 1.25fr 0.75fr; gap: 6px; margin-top: 9px; }
-.cwx-ctl { display: flex; align-items: center; justify-content: center; gap: 5px; background: rgba(20,22,34,0.045); border-radius: 10px; padding: 6px 2px; min-width: 0; }
+.cwx-controls { display: grid; grid-template-columns: 1fr 1.28fr 0.92fr; gap: 8px; margin-top: 9px; }
+.cwx-ctl { display: flex; align-items: center; justify-content: center; gap: 4px; background: rgba(20,22,34,0.045); border-radius: 10px; padding: 6px 2px; min-width: 0; }
 .cwx-ctl .lb { font-size: 9.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.4px; }
 .cwx-ctl b { font-size: 13px; min-width: 26px; text-align: center; white-space: nowrap; }
 .cwx-ctl button { font-size: 16px; font-weight: 800; color: var(--ink2); padding: 0 5px; }
 .cwx-rest b { color: var(--violet); }
+.cwx-ctl b.cwv { cursor: text; border-bottom: 1.5px dashed rgba(20,22,34,0.28); padding-bottom: 1px; line-height: 1.05; }
+.cwx-ctl b.cwv:active { opacity: 0.55; }
+.cwx-ctl b.cwv:has(.cwv-input) { border-bottom-color: transparent; }
+.cwv-input { width: 100%; max-width: 60px; min-width: 30px; border: 0; background: #fff; text-align: center;
+  font-weight: 800; font-size: 13px; outline: none; color: var(--ink); padding: 1px 2px;
+  border-radius: 7px; box-shadow: 0 0 0 1.5px var(--violet, #6B3FD9); }
 
 .step .v.tappable { cursor: text; }
 .step .v.tappable > span { border-bottom: 1.5px dashed rgba(20,22,34,0.22); padding-bottom: 1px; }
@@ -1575,7 +1581,7 @@ ex({ id: 'leg_ext', name: 'Leg Extension', equip: ['machine'], pattern: 'quadiso
     mistakes: ['Swinging the weight up with momentum', 'Letting the stack slam down', 'Seat set so the knee isn’t at the pivot'],
     breath: 'Exhale up, inhale down.' } });
 
-ex({ id: 'lunge_db', name: 'Reverse Lunge', equip: ['dumbbell'], pattern: 'lunge', lvl: 1, inc: 2, unilateral: true, anim: 'lunge',
+ex({ id: 'lunge_db', name: 'Dumbbell Reverse Lunge', equip: ['dumbbell'], pattern: 'lunge', lvl: 1, inc: 2, unilateral: true, anim: 'lunge',
   m: { p: ['quads', 'glutes'], s: ['hamstrings', 'core'] },
   how: {
     setup: ['Stand tall holding a dumbbell in each hand at your sides.'],
@@ -1657,7 +1663,7 @@ ex({ id: 'glute_bridge', name: 'Glute Bridge', equip: ['bodyweight'], pattern: '
     mistakes: ['Overarching at the top', 'Pushing through the toes', 'Rushing the reps'],
     breath: 'Exhale up, inhale down.' } });
 
-ex({ id: 'leg_curl', name: 'Leg Curl', equip: ['machine'], pattern: 'hamiso', cat: 'isolation', lvl: 1, inc: 2.5, anim: 'legcurl',
+ex({ id: 'leg_curl', name: 'Lying Leg Curl', equip: ['machine'], pattern: 'hamiso', cat: 'isolation', lvl: 1, inc: 2.5, anim: 'legcurl',
   m: { p: ['hamstrings'], s: ['calves'] },
   how: {
     setup: ['Lie face down (or sit, on a seated machine) with the pad just above your heels.'],
@@ -3953,7 +3959,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.3.0';
+const APP_VERSION = '3.4.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4296,8 +4302,22 @@ function render() {
   if (_elapsedIv) { clearInterval(_elapsedIv); _elapsedIv = null; }
   const app = $app();
   const prof = activeProfile();
-  if (!prof || App.creating) { app.innerHTML = renderOnboarding(); bindOnboarding(); return; }
-  if (App.workout) { app.innerHTML = renderWorkout(prof); afterWorkoutRender(prof); return; }
+  // Scroll behaviour: amendments (logging a set, editing in place, a background
+  // day/sync refresh) must NOT yank the page back to the top. Only deliberate
+  // navigation — switching tab, opening a different profile, entering/leaving a
+  // workout, or advancing onboarding — resets to the top. Navigation is detected
+  // by a change in the "view key"; anything else keeps the current scroll.
+  const viewKey = (!prof || App.creating)
+    ? 'ob:' + (App.onboarding ? App.onboarding.step : 0)
+    : App.workout ? 'workout'
+    : (App.data.activeProfileId || '') + ':' + App.view;
+  const navigated = App._scrollTop || viewKey !== App._lastViewKey;
+  App._scrollTop = false;
+  App._lastViewKey = viewKey;
+  const y = navigated ? 0 : (window.scrollY || 0);
+
+  if (!prof || App.creating) { app.innerHTML = renderOnboarding(); bindOnboarding(); _restoreScroll(y); return; }
+  if (App.workout) { app.innerHTML = renderWorkout(prof); afterWorkoutRender(prof); _restoreScroll(y); return; }
   let html = '';
   if (App.view === 'today') html = prof.isCoach ? renderCoachHome(prof) : renderToday(prof);
   else if (App.view === 'plan') html = renderPlanView(prof);
@@ -4306,6 +4326,14 @@ function render() {
   else html = renderProfileView(prof);
   app.innerHTML = html + renderTabs(prof);
   afterRender(prof);
+  _restoreScroll(y);
+}
+
+// re-apply a scroll position after an innerHTML swap; the rAF pass catches
+// late reflow from fonts, charts and images clamping the scroll height.
+function _restoreScroll(y) {
+  window.scrollTo(0, y);
+  requestAnimationFrame(() => window.scrollTo(0, y));
 }
 
 function renderTabs(prof) {
@@ -5624,7 +5652,7 @@ function dispatch(e) {
   if (a.startsWith('mob-')) return mobAction(a, el, prof);
   // sheets
   if (a === 'sheet-close') return closeSheet();
-  if (a === 'tab') { App.view = el.dataset.id; closeSheet(); window.scrollTo(0, 0); render(); return; }
+  if (a === 'tab') { App.view = el.dataset.id; closeSheet(); App._scrollTop = true; render(); return; }
   if (a === 'ex-open') { App._vidChoice = null; closeSheet(); showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'vid-pick') { App._vidChoice = { exId: el.dataset.ex, i: +el.dataset.i }; showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'choose-day') { showChooseDaySheet(prof); return; }
@@ -5812,7 +5840,7 @@ function dispatch(e) {
   }
   // library
   if (a === 'lib-group') { App.libFilter.group = el.dataset.v; render(); return; }
-  if (a === 'lib-cat') { App.libFilter.cat = el.dataset.v || ''; App.libFilter.q = ''; window.scrollTo(0, 0); render(); return; }
+  if (a === 'lib-cat') { App.libFilter.cat = el.dataset.v || ''; App.libFilter.q = ''; App._scrollTop = true; render(); return; }
   if (a === 'lib-equip') { App.libFilter.equip = App.libFilter.equip === 'mine' ? '' : 'mine'; render(); return; }
   // profile
   if (a === 'prof-switch') {
@@ -5872,6 +5900,10 @@ const REST_STEPS = [30, 45, 60, 90, 120, 150, 180];
 /* ---------- builder sheet ---------- */
 function showBuilderSheet(prof) {
   const d = App.cwDraft;
+  // if we're rebuilding an already-open builder sheet (e.g. after a +/− tap or
+  // typing a value), remember where it was scrolled so the rebuild doesn't jump
+  const _prevSheet = document.querySelector('.sheet');
+  const _keepScroll = _prevSheet && _prevSheet.querySelector('#cw-list') ? _prevSheet.scrollTop : null;
   const rows = d.exercises.map((pe, i) => {
     const ex = EX_BY_ID[pe.exId];
     return `<div class="cwx">
@@ -5885,10 +5917,11 @@ function showBuilderSheet(prof) {
       </div>
       <div class="cwx-controls">
         <div class="cwx-ctl"><span class="lb">Sets</span>
-          <button data-a="cw-step" data-i="${i}" data-f="sets" data-d="-1">−</button><b>${pe.sets}</b><button data-a="cw-step" data-i="${i}" data-f="sets" data-d="1">+</button></div>
+          <button data-a="cw-step" data-i="${i}" data-f="sets" data-d="-1">−</button><b class="cwv" data-a="cw-typein" data-i="${i}" data-f="sets" title="Tap to type">${pe.sets}</b><button data-a="cw-step" data-i="${i}" data-f="sets" data-d="1">+</button></div>
         <div class="cwx-ctl"><span class="lb">${pe.timed ? 'Secs' : 'Reps'}</span>
-          <button data-a="cw-step" data-i="${i}" data-f="repsMin" data-d="-1">−</button><b>${pe.repsMin}–${pe.repsMax}</b><button data-a="cw-step" data-i="${i}" data-f="repsMax" data-d="1">+</button></div>
-        <button class="cwx-ctl cwx-rest" data-a="cw-rest" data-i="${i}"><span class="lb">Rest</span><b>${U.fmtDur(pe.rest)}</b></button>
+          <button data-a="cw-step" data-i="${i}" data-f="repsMin" data-d="-1">−</button><b class="cwv" data-a="cw-typein" data-i="${i}" data-f="reps" title="Tap to type — e.g. 8-12">${pe.repsMin}–${pe.repsMax}</b><button data-a="cw-step" data-i="${i}" data-f="repsMax" data-d="1">+</button></div>
+        <div class="cwx-ctl"><span class="lb">Rest</span>
+          <button data-a="cw-reststep" data-i="${i}" data-d="-1">−</button><b class="cwv" data-a="cw-typein" data-i="${i}" data-f="rest" title="Tap to type — seconds or 1:30">${U.fmtDur(pe.rest)}</b><button data-a="cw-reststep" data-i="${i}" data-d="1">+</button></div>
         ${i < d.exercises.length - 1 ? `<button class="cwx-ctl cwx-link ${pe.ssWithNext ? 'on' : ''}" data-a="cw-link" data-i="${i}"><span class="lb">Pair</span><b>${pe.ssWithNext ? '🔗 superset' : '+ superset'}</b></button>` : ''}
       </div>
       ${prof.isCoach ? `<input class="cwx-note" data-i="${i}" placeholder="📝 Note for this exercise — e.g. slow 3s down" maxlength="200" value="${U.esc(pe.note || '')}">` : ''}
@@ -5914,6 +5947,7 @@ function showBuilderSheet(prof) {
     const pe = App.cwDraft.exercises[+inp.dataset.i];
     if (pe) pe.note = inp.value;
   }));
+  if (_keepScroll != null) { const s = document.querySelector('.sheet'); if (s) s.scrollTop = _keepScroll; }
 }
 
 /* exercise picker for the builder */
@@ -6012,11 +6046,51 @@ function customAction(a, el, prof) {
     if (f === 'repsMax') pe.repsMax = U.clamp(pe.repsMax + delta * (pe.timed ? 5 : 1), pe.repsMin + 1, pe.timed ? 300 : 30);
     showBuilderSheet(prof); return;
   }
-  if (a === 'cw-rest') {
+  if (a === 'cw-reststep') {
     const pe = App.cwDraft.exercises[+el.dataset.i];
-    const cur = REST_STEPS.indexOf(pe.rest);
-    pe.rest = REST_STEPS[(cur + 1 + REST_STEPS.length) % REST_STEPS.length] || 60;
+    const delta = +el.dataset.d;
+    // snap to the nearest preset, then step in that direction
+    let idx = REST_STEPS.findIndex(v => v >= pe.rest);
+    if (idx < 0) idx = REST_STEPS.length - 1;
+    if (delta > 0 && REST_STEPS[idx] <= pe.rest) idx++;
+    if (delta < 0) idx = (REST_STEPS[idx] >= pe.rest ? idx : idx + 1) - 1;
+    idx = U.clamp(idx, 0, REST_STEPS.length - 1);
+    pe.rest = REST_STEPS[idx];
     showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-typein') {
+    if (el.querySelector('input')) return;
+    const i = +el.dataset.i, f = el.dataset.f, pe = App.cwDraft.exercises[i];
+    if (!pe) return;
+    const cur = f === 'sets' ? String(pe.sets) : f === 'reps' ? `${pe.repsMin}-${pe.repsMax}` : String(pe.rest);
+    const hint = f === 'reps' ? '8-12' : f === 'rest' ? 'sec' : '';
+    el.innerHTML = `<input class="cwv-input" type="text" inputmode="${f === 'reps' ? 'text' : 'numeric'}" enterkeyhint="done" value="${U.esc(cur)}" placeholder="${hint}">`;
+    const inp = el.querySelector('input'); inp.focus(); inp.select();
+    const commit = () => {
+      const raw = (inp.value || '').trim();
+      if (raw !== '') {
+        if (f === 'sets') pe.sets = U.clamp(Math.round(parseFloat(raw)) || pe.sets, 1, 12);
+        else if (f === 'rest') {
+          let sec;
+          if (/^\d{1,2}:\d{1,2}$/.test(raw)) { const [m, s] = raw.split(':').map(Number); sec = m * 60 + s; }
+          else sec = Math.round(parseFloat(raw.replace(/[^0-9.]/g, '')));
+          if (!isNaN(sec) && sec > 0) pe.rest = U.clamp(sec, 5, 600);
+        } else { // reps range: "8-12", "8 12", or single "10"
+          const nums = raw.replace(/[–—]/g, '-').match(/\d+/g);
+          if (nums && nums.length) {
+            const cap = pe.timed ? 600 : 100;
+            let lo = U.clamp(Math.round(+nums[0]), 1, cap);
+            let hi = nums[1] != null ? U.clamp(Math.round(+nums[1]), 1, cap) : lo;
+            if (hi < lo) { const t = lo; lo = hi; hi = t; }
+            pe.repsMin = lo; pe.repsMax = Math.max(hi, lo);
+          }
+        }
+      }
+      showBuilderSheet(prof); // rebuild preserves the sheet's scroll position (see top of showBuilderSheet)
+    };
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } });
+    return;
   }
   if (a === 'cw-link') { // superset with the next exercise
     const pe = App.cwDraft.exercises[+el.dataset.i];

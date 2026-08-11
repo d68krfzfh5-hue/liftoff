@@ -3649,13 +3649,31 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
     exercises: (c.exercises || []).map(sanitizePe).filter(Boolean),
   })).filter(c => c.exercises.length);
   prof.customWorkouts = hers.concat(coachCustoms);
+  // A coach plan governs the weekly schedule: drop the athlete's own pre-plan
+  // weekday overrides so the program days show through. Coach-set overrides
+  // (applied just below) still take effect. Her custom workout DEFINITIONS stay
+  // in customWorkouts — nothing she built is lost, only the auto-pin that was
+  // shadowing the program day (e.g. her old "Glute Focus" on Tuesdays) is cleared.
+  if (prof.customMap && typeof prof.customMap === 'object') {
+    const coachIds = new Set(coachCustoms.map(c => c.id));
+    for (const [wd, id] of Object.entries(prof.customMap)) if (!coachIds.has(id)) delete prof.customMap[wd];
+  }
   if (doc.customMap && typeof doc.customMap === 'object') {
     prof.customMap = prof.customMap || {};
     const validIds = new Set(prof.customWorkouts.map(c => c.id));
     for (const [wd, id] of Object.entries(doc.customMap)) if (validIds.has(id)) prof.customMap[wd] = id;
   }
-  if (doc.program && typeof doc.program.n === 'number' && doc.program.n > ((prof.program && prof.program.n) || 0)) {
-    prof.program = { n: doc.program.n, start: doc.program.start || U.weekKey(U.todayISO()) };
+  // Adopt the coach's program: advance the number when it's higher, AND sync the
+  // coach's start date even when the number is unchanged — otherwise the athlete
+  // keeps her pre-plan start and the week counter is off (e.g. "Week 2" on the
+  // program's first week).
+  if (doc.program && typeof doc.program.n === 'number') {
+    const cur = (prof.program && typeof prof.program.n === 'number') ? prof.program : { n: 0, start: null };
+    const advance = doc.program.n > cur.n;
+    const startDiffers = doc.program.n === cur.n && doc.program.start && doc.program.start !== cur.start;
+    if (advance || startDiffers) {
+      prof.program = { n: doc.program.n, start: doc.program.start || cur.start || U.weekKey(U.todayISO()) };
+    }
   }
   prof.coachName = doc.coach || 'Your coach';
   const newMsg = doc.msg || '';
@@ -3959,7 +3977,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.4.0';
+const APP_VERSION = '3.4.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }

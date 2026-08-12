@@ -263,6 +263,13 @@ h1, h2, h3 { line-height: 1.15; }
 .mm-body path, .mm-body circle, .mm-body rect { fill: #ECEAF3; }
 .mm-p * { fill: #FF4D3D; } .mm-p circle, .mm-p rect, .mm-p path { fill: #FF4D3D; }
 .mm-s * { fill: #FFC069; }
+/* v3.7 anatomical bodies */
+.mm-skin path, .mm-skin ellipse { fill: #F3F1F8; stroke: #D6D1E3; stroke-width: 0.7; stroke-linejoin: round; }
+.mm-m path, .mm-m rect, .mm-m ellipse { fill: #E4E0EE; stroke: #FBFAFD; stroke-width: 0.7; stroke-linejoin: round; }
+.mm-m.mm-p path, .mm-m.mm-p rect, .mm-m.mm-p ellipse { fill: #FF4D3D; }
+.mm-m.mm-s path, .mm-m.mm-s rect, .mm-m.mm-s ellipse { fill: #FFC069; }
+.mm-m.mm-hot path, .mm-m.mm-hot rect, .mm-m.mm-hot ellipse { fill: inherit; }
+.musclemap .mm-seam { fill: none !important; stroke: #FBFAFD !important; stroke-width: 0.75; stroke-linecap: round; }
 .mm-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: 1.5px; fill: var(--ink3); font-family: inherit; }
 .mm-key { display: flex; justify-content: center; gap: 16px; font-size: 12px; color: var(--ink2); font-weight: 600; margin-top: 8px; }
 .mm-key i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
@@ -1414,104 +1421,270 @@ anim('superman', { dur: 2600, frames: [
 ] });
 
 
-/* ============ LiftOff — muscle highlight body map (front + back SVG) ============ */
+/* ============ LiftOff — anatomical muscle body map (front + back SVG) ============
+   Parametric figures: one geometry engine, female/male measurement presets.
+   Shapes are point lists smoothed with Catmull-Rom → cubic beziers, authored for
+   the LEFT half and mirrored around x=50, so bodies are organic AND symmetric.
+   Muscles tile the silhouette (thin light seams between them) like a printed
+   anatomy chart. Coordinate space per figure: 0..100 × 0..170.
+   API: MuscleMap.svg(prim, sec, opts) — muscles-worked (classes mm-p/mm-s);
+        MuscleMap.heat(vals, opts) — recovery heat.  opts.sex: 'female'|'male'. */
 'use strict';
 
 const MuscleMap = (() => {
-  // region shapes per figure. coordinate space per figure: 0..100 x, 0..170 y
-  const R = {
-    delts_f:   { fig: 'f', s: '<circle cx="30" cy="36" r="7"/><circle cx="70" cy="36" r="7"/>' },
-    chest:     { fig: 'f', s: '<rect x="35" y="31" width="14" height="15" rx="4"/><rect x="51" y="31" width="14" height="15" rx="4"/>' },
-    biceps:    { fig: 'f', s: '<rect x="24" y="44" width="8" height="17" rx="4" transform="rotate(6 28 52)"/><rect x="68" y="44" width="8" height="17" rx="4" transform="rotate(-6 72 52)"/>' },
-    forearms_f:{ fig: 'f', s: '<rect x="21" y="64" width="7" height="18" rx="3.5" transform="rotate(9 24 73)"/><rect x="72" y="64" width="7" height="18" rx="3.5" transform="rotate(-9 76 73)"/>' },
-    abs:       { fig: 'f', s: '<rect x="42" y="49" width="16" height="28" rx="5"/>' },
-    obliques:  { fig: 'f', s: '<rect x="35" y="51" width="5.5" height="22" rx="2.7"/><rect x="59.5" y="51" width="5.5" height="22" rx="2.7"/>' },
-    quads:     { fig: 'f', s: '<rect x="37" y="82" width="11" height="34" rx="5"/><rect x="52" y="82" width="11" height="34" rx="5"/>' },
-    calves_f:  { fig: 'f', s: '<rect x="39" y="124" width="8" height="24" rx="4"/><rect x="53" y="124" width="8" height="24" rx="4"/>' },
-    traps:     { fig: 'b', s: '<path d="M40 24 L60 24 L54 40 L46 40 Z"/>' },
-    delts_b:   { fig: 'b', s: '<circle cx="30" cy="36" r="6.5"/><circle cx="70" cy="36" r="6.5"/>' },
-    upperback: { fig: 'b', s: '<rect x="38" y="30" width="24" height="15" rx="4"/>' },
-    lats:      { fig: 'b', s: '<path d="M37 46 L47 49 L46 70 L38 62 Z"/><path d="M63 46 L53 49 L54 70 L62 62 Z"/>' },
-    lowback:   { fig: 'b', s: '<rect x="43" y="63" width="14" height="15" rx="4"/>' },
-    triceps:   { fig: 'b', s: '<rect x="24" y="44" width="8" height="17" rx="4" transform="rotate(6 28 52)"/><rect x="68" y="44" width="8" height="17" rx="4" transform="rotate(-6 72 52)"/>' },
-    forearms_b:{ fig: 'b', s: '<rect x="21" y="64" width="7" height="18" rx="3.5" transform="rotate(9 24 73)"/><rect x="72" y="64" width="7" height="18" rx="3.5" transform="rotate(-9 76 73)"/>' },
-    glutes:    { fig: 'b', s: '<rect x="38" y="80" width="11.5" height="15" rx="5"/><rect x="50.5" y="80" width="11.5" height="15" rx="5"/>' },
-    hams:      { fig: 'b', s: '<rect x="37" y="99" width="11" height="28" rx="5"/><rect x="52" y="99" width="11" height="28" rx="5"/>' },
-    calves_b:  { fig: 'b', s: '<rect x="39" y="131" width="8" height="22" rx="4"/><rect x="53" y="131" width="8" height="22" rx="4"/>' },
+  /* half-widths from the centre line; shared Y landmarks live in buildFigures */
+  const SEXES = {
+    female: { headRx: 6.7, headRy: 8.6, neckW: 4.2, shTip: 20.6, deltOut: 21.8, armpitX: 15.4,
+              ribs: 12.6, waist: 10.6, iliac: 13.4, hip: 17.2, thighMid: 15.0,
+              kneeOut: 7.6, kneeIn: 3.4, calfOut: 8.8, calfIn: 2.9, ankleOut: 4.4,
+              armW: 5.2, elbowW: 3.7, wristW: 2.4, absW: 8.6, gluteW: 15.6, gluteBot: 98.5 },
+    male:   { headRx: 7.0, headRy: 8.8, neckW: 5.3, shTip: 24.2, deltOut: 25.4, armpitX: 18.6,
+              ribs: 15.4, waist: 13.6, iliac: 14.6, hip: 15.6, thighMid: 14.8,
+              kneeOut: 7.9, kneeIn: 3.5, calfOut: 9.4, calfIn: 3.0, ankleOut: 4.7,
+              armW: 6.2, elbowW: 4.5, wristW: 2.8, absW: 9.8, gluteW: 14.8, gluteBot: 96.5 },
   };
+
+  const fx = n => Math.round(n * 10) / 10;
+  /* Catmull-Rom smoothing → cubic bezier path. pts = [[x,y],...] */
+  function crPath(pts, closed) {
+    const n = pts.length;
+    const at = i => pts[((i % n) + n) % n];
+    let d = `M ${fx(pts[0][0])} ${fx(pts[0][1])}`;
+    const segs = closed ? n : n - 1;
+    for (let i = 0; i < segs; i++) {
+      const p1 = at(i), p2 = at(i + 1);
+      const p0 = (!closed && i === 0) ? p1 : at(i - 1);
+      const p3 = (!closed && i === segs - 1) ? p2 : at(i + 2);
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+      d += ` C ${fx(c1[0])} ${fx(c1[1])} ${fx(c2[0])} ${fx(c2[1])} ${fx(p2[0])} ${fx(p2[1])}`;
+    }
+    return d + (closed ? ' Z' : '');
+  }
+  const mir = d => `<path d="${d}"/><path d="${d}" transform="translate(100 0) scale(-1 1)"/>`;
+  const mirRaw = s => `${s}<g transform="translate(100 0) scale(-1 1)">${s}</g>`;
+
+  function buildFigures(sex) {
+    const P = SEXES[sex];
+    const p = (o, y) => [50 - o, y];             // point at offset o LEFT of centre
+    const sh = pts => crPath(pts, true);          // smooth closed shape
+    const seamD = pts => `<path class="mm-seam" d="${crPath(pts, false)}"/>`;
+
+    /* Y landmarks */
+    const nB = 25.4;                              // neck base
+    const elbowX = P.shTip + 0.8, wristX = P.shTip + 1.4;
+
+    /* ---------- skin silhouette ---------- */
+    const head = `<ellipse cx="50" cy="11.4" rx="${P.headRx}" ry="${P.headRy}"/>`;
+    const torso = sh([
+      p(0, 19.6), p(P.neckW, 19.8), p(P.neckW + 0.3, nB),         // neck side
+      p(P.shTip - 6.5, 26.9), p(P.shTip, 29.3),                    // trap slope → shoulder tip
+      p(P.armpitX + 1.4, 36.8), p(P.armpitX, 40.5),                // armpit
+      p(P.ribs, 52), p(P.waist, 61), p(P.iliac, 68), p(P.hip, 77), // side
+      p(P.hip - 1.6, 82.5), p(6.4, 86.4), p(0, 87.6),              // groin to centre
+    ].concat([p(-0.01, 19.6)]));                                   // close up the centre
+    const leg = sh([
+      p(P.hip - 0.3, 78.6), p(P.thighMid, 97), p(P.kneeOut + 1.5, 111),
+      p(P.kneeOut, 119), p(P.kneeOut + 0.2, 125.5),
+      p(P.calfOut, 133), p(P.calfOut - 1.5, 141.5), p(P.ankleOut, 153),   // outer calf → ankle
+      p(P.ankleOut + 0.7, 157), p(P.ankleOut + 2.7, 159.6), p(P.ankleOut + 1.5, 162),  // foot out
+      p(3.3, 161.6), p(2.2, 157.6), p(2.3, 153),                    // foot in → inner ankle
+      p(2.7, 146), p(P.calfIn, 135.5), p(3.2, 127),                 // inner calf
+      p(P.kneeIn, 119.5), p(3.8, 110), p(2.3, 97), p(1.2, 88.4),    // inner thigh
+      p(5.2, 86.8), p(P.hip - 3.6, 81.4),                           // groin
+    ]);
+    const arm = sh([
+      p(P.shTip - 2.4, 29.7), p(P.deltOut - 0.3, 32.2), p(P.deltOut, 36.4),
+      p(P.deltOut - 1.1, 41.6),                                     // outer delt
+      p(elbowX + P.elbowW, 57.5), p(elbowX + P.elbowW - 0.7, 63),
+      p(wristX + P.wristW, 82),                                     // outer forearm
+      p(wristX + P.wristW + 1.1, 88), p(wristX + P.wristW + 0.4, 92.5),
+      p(wristX - 0.3, 96), p(wristX - P.wristW - 0.4, 91.5), p(wristX - P.wristW, 84), // hand
+      p(elbowX - P.elbowW + 0.2, 62.5), p(elbowX - P.elbowW + 0.7, 58),
+      p(P.armpitX + 0.6, 42.5), p(P.armpitX + 1, 38.2),             // inner arm → armpit
+    ]);
+    const skin = `<g class="mm-skin">${head}${mir(torso)}${mir(leg)}${mir(arm)}</g>`;
+
+    /* ---------- muscle regions (tiling the body) ---------- */
+    const R = {};
+
+    /* — arms (same silhouette both views) — */
+    const deltShape = sh([
+      p(P.shTip - 3.4, 30.1), p(P.deltOut - 0.8, 32.4), p(P.deltOut - 0.4, 36.4),
+      p(P.deltOut - 1.5, 41.2), p(P.shTip + 0.4, 44.9),             // deltoid point
+      p(P.armpitX + 1.1, 41), p(P.armpitX + 1.5, 36.4), p(P.armpitX + 2.6, 32.6),
+    ]);
+    const upperArm = endY => sh([
+      p(P.shTip + 0.2, 45.6), p(elbowX + P.elbowW - 0.5, 52),
+      p(elbowX + P.elbowW - 0.9, endY - 1), p(elbowX - 0.5, endY),
+      p(elbowX - P.elbowW + 0.8, endY - 0.7), p(P.armpitX + 1.2, 43.6),
+    ]);
+    const foreArm = sh([
+      p(elbowX - 0.3, 61.7), p(elbowX + P.elbowW - 0.8, 63.5), p(wristX + P.wristW + 0.3, 71),
+      p(wristX + P.wristW - 0.2, 81.5), p(wristX - P.wristW + 0.2, 81.8),
+      p(elbowX - P.elbowW + 1, 66),
+    ]);
+    R.delts = { fig: 'f', s: mir(deltShape) };
+    R.biceps = { fig: 'f', s: mir(upperArm(59.5)) };
+    R.forearms_f = { fig: 'f', s: mir(foreArm) };
+    R.delts_b = { fig: 'b', s: mir(deltShape) };
+    R.triceps = { fig: 'b', s: mir(upperArm(60.5)) + mirRaw(seamD([p(elbowX + 1.6, 48), p(elbowX + 1.2, 54), p(elbowX - 0.4, 58.5)])) };
+    R.forearms_b = { fig: 'b', s: mir(foreArm) };
+
+    /* — front torso — */
+    R.traps_f = { fig: 'f', s: mir(sh([
+      p(P.neckW + 0.5, nB + 0.2), p(P.shTip - 6.3, 27.3), p(P.shTip - 3, 29.2),
+      p(P.shTip - 4.5, 29.9), p(P.neckW + 1, 28.6),
+    ])) };
+    R.chest = { fig: 'f', s: mir(sh([
+      p(0.9, 33.4), p(7.5, 32.7), p(12.5, 33.1), p(P.armpitX + 0.8, 34.8),   // clavicle line
+      p(P.armpitX - 0.2, 39.8), p(P.armpitX - 1.2, 43),                       // underarm
+      p(11.5, 46.4), p(5.5, 47.4), p(0.9, 46.9),                              // pec bottom
+    ])) };
+    {
+      const rows = [[47.9, 6.2], [54.9, 6.2], [61.9, 6.2], [68.9, 8.2]];      // [y, h]
+      let abs = '';
+      rows.forEach(([y, h], i) => {
+        const w = P.absW - i * 0.5;
+        abs += `<rect x="${fx(50 - w)}" y="${fx(y)}" width="${fx(w - 0.5)}" height="${h}" rx="2.4"/>` +
+               `<rect x="50.5" y="${fx(y)}" width="${fx(w - 0.5)}" height="${h}" rx="2.4"/>`;
+      });
+      R.abs = { fig: 'f', s: abs };
+    }
+    R.obliques = { fig: 'f', s: mir(sh([
+      p(P.armpitX - 1.6, 44), p(12, 46.8), p(P.absW + 0.7, 49.5),             // under the pec
+      p(P.absW + 0.6, 60), p(P.absW - 0.3, 70), p(8.2, 76.6),                 // beside the abs
+      p(P.iliac - 1.5, 74.5), p(P.iliac - 0.6, 68), p(P.waist - 0.5, 61), p(P.ribs - 0.5, 52),
+    ])) };
+
+    /* — front legs — */
+    const sart = [p(P.hip - 2.6, 81.2), p(9.2, 91), p(5.7, 101.5), p(4.3, 111.5)]; // sartorius line
+    R.quads = { fig: 'f', s: mir(sh([
+      p(P.hip - 1.4, 79.8), p(P.thighMid - 0.5, 97), p(P.kneeOut + 0.9, 110.5),
+      p(P.kneeOut - 0.4, 116.6), p(P.kneeIn + 1.4, 117),                       // knee top
+      sart[3], sart[2], sart[1], sart[0],                                      // back up the sartorius
+    ]))
+      + mirRaw(seamD([p(10.6, 87), p(9.4, 97), p(7.6, 107), p(6.8, 114.5)]))   // rectus femoris
+      + mirRaw(seamD([p(6.3, 103), p(5.2, 109), p(4.9, 114.8)])) };            // vastus medialis
+    R.adductors = { fig: 'f', s: mir(sh([
+      p(8.6, 90.6), p(5.5, 100.5), p(4.4, 109), p(3.9, 111), p(3.6, 104),
+      p(2.4, 95.5), p(1.4, 88.9), p(4.8, 87.6),
+    ])) };
+    R.calves_f = { fig: 'f', s: mir(sh([
+      p(P.kneeIn + 2.5, 126.4), p(6.7, 130.5), p(6.1, 139), p(4.9, 149.5),
+      p(3.4, 149.8), p(3.6, 139), p(4.1, 130), p(4.5, 126.8),
+    ])) + mirRaw(seamD([p(7.6, 128), p(8.3, 134), p(7.5, 143)])) };
+
+    /* — back torso — */
+    R.traps = { fig: 'b', s: mir(sh([
+      p(0.7, 21.6), p(P.neckW + 0.6, 23), p(P.shTip - 3, 29.2),
+      p(10.4, 35.8), p(2.3, 47), p(0.7, 48.6),
+    ])) };
+    R.upperback = { fig: 'b', s: mir(sh([
+      p(P.armpitX + 0.9, 35.4), p(P.armpitX - 0.4, 40.6), p(8.9, 44.4), p(9.9, 37.6),
+    ])) };
+    R.lats = { fig: 'b', s: mir(sh([
+      p(P.armpitX - 0.7, 41.8), p(P.ribs - 0.3, 50.5), p(P.waist - 0.4, 60),
+      p(3.4, 69.3), p(1.7, 70.3), p(1.9, 55.5), p(2.8, 48.6), p(9, 45.2),
+    ])) };
+    R.lowback = { fig: 'b', s: mir(sh([
+      p(1, 62.2), p(4.3, 63.2), p(4.7, 71), p(3.9, 79.6), p(1, 80.4),
+    ])) };
+    R.glutes = { fig: 'b', s: mir(sh([
+      p(1, 73.8), p(8, 72.6), p(13.2, 75.2), p(P.gluteW, 82),
+      p(P.gluteW - 1.6, 91), p(8.6, P.gluteBot), p(2.7, P.gluteBot - 1.4), p(1, 88),
+    ])) + mirRaw(seamD([p(3.4, 76.4), p(8.8, 78.8), p(12.8, 83.4)])) };
+    R.hams = { fig: 'b', s: mir(sh([
+      p(12.9, P.gluteBot + 1.2), p(13.1, 107), p(11.5, 115.5), p(9.7, 122.8),
+      p(5.5, 123.2), p(4.3, 112), p(4.7, 102), p(8, P.gluteBot + 0.4),
+    ])) + mirRaw(seamD([p(8.6, P.gluteBot + 2), p(8.2, 108), p(7.6, 121)])) };
+    R.calves_b = { fig: 'b', s: mir(sh([
+      p(9.7, 126.2), p(10.5, 132.5), p(9.4, 141.5), p(7.4, 146.2),
+      p(5.1, 143.6), p(4.2, 135), p(4.7, 127.8), p(7, 125.2),
+    ])) + mirRaw(seamD([p(7.3, 127), p(7.1, 136), p(6.9, 144)])) };
+
+    return { skin, R };
+  }
+
+  const CACHE = {};
+  const figs = sex => { sex = SEXES[sex] ? sex : 'female'; return CACHE[sex] || (CACHE[sex] = buildFigures(sex)); };
+
   const MUSCLE_TO_REGIONS = {
-    chest: ['chest'], shoulders: ['delts_f', 'delts_b'], biceps: ['biceps'], triceps: ['triceps'],
+    chest: ['chest'], shoulders: ['delts', 'delts_b'], biceps: ['biceps'], triceps: ['triceps'],
     forearms: ['forearms_f', 'forearms_b'], abs: ['abs'], obliques: ['obliques'], core: ['abs', 'obliques'],
-    quads: ['quads'], adductors: ['quads'], calves: ['calves_f', 'calves_b'],
-    lats: ['lats'], upperback: ['traps', 'upperback'], lowerback: ['lowback'],
+    quads: ['quads'], adductors: ['adductors'], calves: ['calves_f', 'calves_b'],
+    lats: ['lats'], upperback: ['traps', 'traps_f', 'upperback'], lowerback: ['lowback'],
     glutes: ['glutes'], hamstrings: ['hams'], reardelts: ['delts_b'],
   };
 
-  // simplified body silhouette (shared front/back)
-  const BODY = `
-    <circle cx="50" cy="12" r="9"/>
-    <rect x="46" y="20" width="8" height="6" rx="2"/>
-    <path d="M32 27 Q50 22 68 27 L66 62 Q50 68 34 62 Z"/>
-    <path d="M32 27 Q24 30 23 44 L20 80 Q20 84 24 84 L28 84 Q31 83 31 79 L34 48 Z"/>
-    <path d="M68 27 Q76 30 77 44 L80 80 Q80 84 76 84 L72 84 Q69 83 69 79 L66 48 Z"/>
-    <path d="M34 62 Q50 68 66 62 L66 78 L34 78 Z"/>
-    <path d="M35 78 L48 78 L47 118 L44 156 Q44 159 41 159 L38 159 Q35 159 35 155 L36 112 Z"/>
-    <path d="M65 78 L52 78 L53 118 L56 156 Q56 159 59 159 L62 159 Q65 159 65 155 L64 112 Z"/>`;
-
-  function figure(kind, prim, sec) {
-    let hi = '';
-    for (const [muscle, regions] of Object.entries(MUSCLE_TO_REGIONS)) {
-      const isP = prim.includes(muscle), isS = !isP && sec.includes(muscle);
-      if (!isP && !isS) continue;
-      for (const rid of regions) {
-        const r = R[rid]; if (r.fig !== kind) continue;
-        hi += `<g class="${isP ? 'mm-p' : 'mm-s'}">${r.s}</g>`;
-      }
-    }
-    return `<g class="mm-body">${BODY}</g>${hi}`;
-  }
-
-  /* recovery heat-map: vals = {muscleKey: 0..1 workedness} */
+  /* recovery heat: vals = {muscleKey: 0..1 workedness} */
   function heatColor(t) {
     const mix = (a, b, u) => Math.round(a + (b - a) * u);
-    const from = [255, 224, 184], to = [255, 77, 61]; // soft peach → hot red
+    const from = [255, 216, 168], to = [255, 77, 61]; // soft peach → hot red
     const u = Math.max(0, Math.min(1, (t - 0.08) / 0.92));
     return `rgb(${mix(from[0], to[0], u)},${mix(from[1], to[1], u)},${mix(from[2], to[2], u)})`;
   }
-  function heatFigure(kind, vals) {
-    let hi = '';
-    for (const [muscle, t] of Object.entries(vals)) {
-      if (t <= 0.04) continue;
-      const regions = MUSCLE_TO_REGIONS[muscle]; if (!regions) continue;
-      const col = heatColor(t);
-      for (const rid of regions) {
-        const r = R[rid]; if (r.fig !== kind) continue;
-        hi += `<g fill="${col}" opacity="${(0.5 + 0.5 * t).toFixed(2)}">${r.s}</g>`;
-      }
+
+  /* per-region paint: null = resting base, {cls} = class paint, {fill} = heat paint */
+  function figure(kind, sex, paintFor) {
+    const F = figs(sex);
+    let out = F.skin;
+    for (const [rid, r] of Object.entries(F.R)) {
+      if (r.fig !== kind) continue;
+      const pnt = paintFor(rid);
+      if (pnt && pnt.fill) out += `<g class="mm-m mm-hot" fill="${pnt.fill}" data-g="${rid}">${r.s}</g>`;
+      else if (pnt && pnt.cls) out += `<g class="mm-m ${pnt.cls}" data-g="${rid}">${r.s}</g>`;
+      else out += `<g class="mm-m" data-g="${rid}">${r.s}</g>`;
     }
-    return `<g class="mm-body">${BODY}</g>${hi}`;
+    return out;
   }
-  function heat(vals, opts) {
-    vals = vals || {};
-    const lbl = !opts || opts.labels !== false;
-    return `<svg viewBox="0 0 216 ${lbl ? 184 : 168}" class="musclemap" role="img" aria-label="Muscle recovery map">
-      <g transform="translate(4,2)">${heatFigure('f', vals)}</g>
-      <g transform="translate(112,2)">${heatFigure('b', vals)}</g>
+
+  function paintFromVals(vals) {
+    const best = {};
+    for (const [muscle, t] of Object.entries(vals)) {
+      const regions = MUSCLE_TO_REGIONS[muscle]; if (!regions) continue;
+      for (const rid of regions) best[rid] = Math.max(best[rid] || 0, t);
+    }
+    return rid => {
+      const t = best[rid] || 0;
+      return t > 0.04 ? { fill: heatColor(t) } : null;
+    };
+  }
+
+  function paintFromLists(prim, sec) {
+    const cls = {};
+    for (const [muscle, regions] of Object.entries(MUSCLE_TO_REGIONS)) {
+      const isP = prim.includes(muscle), isS = !isP && sec.includes(muscle);
+      if (!isP && !isS) continue;
+      for (const rid of regions) if (cls[rid] !== 'mm-p') cls[rid] = isP ? 'mm-p' : 'mm-s';
+    }
+    return rid => (cls[rid] ? { cls: cls[rid] } : null);
+  }
+
+  function wrap(inner, lbl, label) {
+    return `<svg viewBox="0 0 216 ${lbl ? 184 : 168}" class="musclemap" role="img" aria-label="${label}">
+      ${inner}
       ${lbl ? `<text x="54" y="178" class="mm-lbl" text-anchor="middle">FRONT</text>
       <text x="162" y="178" class="mm-lbl" text-anchor="middle">BACK</text>` : ''}
     </svg>`;
+  }
+
+  function heat(vals, opts) {
+    vals = vals || {};
+    const sex = opts && opts.sex, lbl = !opts || opts.labels !== false;
+    const paint = paintFromVals(vals);
+    return wrap(`<g transform="translate(4,2)">${figure('f', sex, paint)}</g>
+      <g transform="translate(112,2)">${figure('b', sex, paint)}</g>`, lbl, 'Muscle recovery map');
   }
 
   function svg(prim, sec, opts) {
     prim = prim || []; sec = sec || [];
-    const lbl = opts && opts.labels !== false;
-    return `<svg viewBox="0 0 216 ${lbl ? 184 : 168}" class="musclemap" role="img" aria-label="Muscles worked">
-      <g transform="translate(4,2)">${figure('f', prim, sec)}</g>
-      <g transform="translate(112,2)">${figure('b', prim, sec)}</g>
-      ${lbl ? `<text x="54" y="178" class="mm-lbl" text-anchor="middle">FRONT</text>
-      <text x="162" y="178" class="mm-lbl" text-anchor="middle">BACK</text>` : ''}
-    </svg>`;
+    const sex = opts && opts.sex, lbl = !opts || opts.labels !== false;
+    const paint = paintFromLists(prim, sec);
+    return wrap(`<g transform="translate(4,2)">${figure('f', sex, paint)}</g>
+      <g transform="translate(112,2)">${figure('b', sex, paint)}</g>`, lbl, 'Muscles worked');
   }
+
   return { svg, heat };
 })();
 
@@ -3289,6 +3462,7 @@ function migrateProfile(p) {
   if (!p.quiz.weekSchedule) p.quiz.weekSchedule = scheduleFromDays(p.quiz.daysPerWeek || 3);
   if (!p.sportLogs) p.sportLogs = [];
   if (!p.quiz.videoPref) p.quiz.videoPref = 'auto';
+  if (!p.quiz.bodySex) p.quiz.bodySex = 'female';
   if (!p.customWorkouts) p.customWorkouts = [];
   if (!p.savedPlans) p.savedPlans = [];
   if (!p.flags) p.flags = {};
@@ -3820,6 +3994,7 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
       sessionMinutes: prof.quiz.sessionMinutes, equipment: prof.quiz.equipment, focus: prof.quiz.focus,
       athleteType: prof.quiz.athleteType, sportLabel: prof.quiz.sportLabel,
       weekSchedule: prof.quiz.weekSchedule, videoPref: prof.quiz.videoPref,
+      bodySex: prof.quiz.bodySex || 'female',
     },
     plan: prof.plan ? {
       daysPerWeek: prof.plan.daysPerWeek,
@@ -3892,7 +4067,7 @@ async function coachSyncTick(prof, force) {
       // first contact: adopt her setup so the editor works with HER kit and goals
       if (!co.adoptedQuiz && full.progress.quiz) {
         const q = full.progress.quiz;
-        for (const k of ['goal', 'experience', 'daysPerWeek', 'sessionMinutes', 'equipment', 'focus', 'athleteType', 'sportLabel', 'weekSchedule', 'videoPref'])
+        for (const k of ['goal', 'experience', 'daysPerWeek', 'sessionMinutes', 'equipment', 'focus', 'athleteType', 'sportLabel', 'weekSchedule', 'videoPref', 'bodySex'])
           if (q[k] != null) prof.quiz[k] = q[k];
         prof.units = full.progress.units || prof.units;
         co.adoptedQuiz = true;
@@ -4104,7 +4279,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.6.0';
+const APP_VERSION = '3.7.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4173,7 +4348,7 @@ function createProfile(quiz) {
       weekSchedule: quiz.weekSchedule || scheduleFromDays(quiz.daysPerWeek || 3),
       daysPerWeek: quiz.weekSchedule ? Math.max(1, liftDaysOf(quiz.weekSchedule).length) : (quiz.daysPerWeek || 3),
       sessionMinutes: quiz.sessionMinutes, equipment: quiz.equipment, focus: quiz.focus || [],
-      videoPref: quiz.videoPref || 'auto',
+      videoPref: quiz.videoPref || 'auto', bodySex: quiz.bodySex === 'male' ? 'male' : 'female',
     },
     planCount: 0, plan: null, logs: [], sportLogs: [], exState: {}, prs: {}, flags: {}, program: { n: 1, start: U.weekKey(U.todayISO()) },
     customWorkouts: [], customMap: {}, savedPlans: [], activeWorkout: null,
@@ -4507,7 +4682,7 @@ const FOCUS_OPTS = [['glutes', '🍑 Glutes'], ['core', '🎯 Core'], ['arms', '
 function obState() {
   if (!App.onboarding) App.onboarding = {
     step: 0, name: '', emoji: '💪', athleteType: null, sportLabel: '', weekSchedule: null,
-    goal: null, experience: null, daysPerWeek: 3, videoPref: 'auto',
+    goal: null, experience: null, daysPerWeek: 3, videoPref: 'auto', bodySex: 'female',
     sessionMinutes: 45, equipment: ['dumbbell', 'barbell', 'machine', 'cable', 'bench', 'kettlebell', 'pullupbar', 'bodyweight'], focus: [], editMode: false,
   };
   return App.onboarding;
@@ -4534,7 +4709,9 @@ function renderOnboarding() {
   if (step === 'name') body = `
     <div class="ob-q">What's your name?</div><div class="ob-hint">And pick your vibe.</div>
     <input class="ob-input" id="ob-name" placeholder="Your name" value="${U.esc(ob.name)}" maxlength="18" autocomplete="off">
-    <div class="emoji-row">${EMOJIS.map(e => `<button class="emoji-pick ${ob.emoji === e ? 'on' : ''}" data-a="ob-emoji" data-e="${e}">${e}</button>`).join('')}</div>`;
+    <div class="emoji-row">${EMOJIS.map(e => `<button class="emoji-pick ${ob.emoji === e ? 'on' : ''}" data-a="ob-emoji" data-e="${e}">${e}</button>`).join('')}</div>
+    <div class="ob-hint" style="margin-top:14px">Muscle diagrams show your body as… <span class="muted">(switch any time in Profile)</span></div>
+    <div class="chips">${[['female', 'Female'], ['male', 'Male']].map(([v, l]) => `<button class="chip ${(ob.bodySex || 'female') === v ? 'grad-on' : ''}" data-a="ob-set" data-k="bodySex" data-v="${v}">${l}</button>`).join('')}</div>`;
   if (step === 'goal') body = `
     <div class="ob-q">What's the goal?</div><div class="ob-hint">This shapes your reps, rests and exercises.</div>
     ${Object.entries(GOALS).map(([id, g]) => `
@@ -4640,7 +4817,7 @@ function obAction(a, el) {
       setTimeout(() => {
         Sound.unlock();
         createProfile({ name: ob.name.trim() || 'Athlete', emoji: ob.emoji, goal: ob.goal, experience: ob.experience,
-          athleteType: ob.athleteType, sportLabel: ob.sportLabel.trim(), weekSchedule: ob.weekSchedule, videoPref: ob.videoPref,
+          athleteType: ob.athleteType, sportLabel: ob.sportLabel.trim(), weekSchedule: ob.weekSchedule, videoPref: ob.videoPref, bodySex: ob.bodySex,
           sessionMinutes: ob.sessionMinutes, equipment: ob.equipment, focus: ob.focus, units: 'kg' });
         App.onboarding = null; App.creating = false; App.view = 'today';
         Confetti.burst(90);
@@ -4870,8 +5047,8 @@ function renderToday(prof) {
           : `Fresh and ready: <b>${fs.fresh.join(', ')}</b> · easing off: ${fs.working.join(', ')}`;
       return `<div class="card">
         <div class="row"><h3>Muscle radar</h3><span class="spacer"></span><span class="muted">last 3 days</span></div>
-        ${MuscleMap.heat(fr)}
-        <div class="mm-key"><span><i style="background:rgba(20,22,34,0.08)"></i>Fresh</span><span><i style="background:#FFD9A8"></i>Easing off</span><span><i style="background:#FF4D3D"></i>Just worked</span></div>
+        ${MuscleMap.heat(fr, { sex: prof.quiz.bodySex })}
+        <div class="mm-key"><span><i style="background:#E4E0EE"></i>Fresh</span><span><i style="background:#FFD9A8"></i>Easing off</span><span><i style="background:#FF4D3D"></i>Just worked</span></div>
         <div class="muted mt8" style="font-size:12.5px;line-height:1.5">${line}</div>
       </div>`;
     })()}
@@ -5349,7 +5526,7 @@ function showExerciseSheet(exId, prof) {
       <h4>Watch out for</h4><ul class="mist">${ex.how.mistakes.map(s => `<li>${U.esc(s)}</li>`).join('')}</ul>
       <div class="breath">🫁 ${U.esc(ex.how.breath)}</div>
       <h4>Muscles worked</h4>
-      ${MuscleMap.svg(ex.m.p, ex.m.s)}
+      ${MuscleMap.svg(ex.m.p, ex.m.s, { sex: prof && prof.quiz ? prof.quiz.bodySex : null })}
       <div class="mm-key"><span><i style="background:#FF4D3D"></i>Primary</span><span><i style="background:#FFC069"></i>Assisting</span></div>
     </div>
     ${prof ? `<div class="prefrow mt16">
@@ -5831,6 +6008,9 @@ function renderProfileView(prof) {
       <div class="set-row"><div><div class="l">Units</div><div class="d">Weights shown in ${prof.units === 'lb' ? 'pounds' : 'kilograms'}</div></div>
         <div class="seg" style="margin:0;width:130px"><button class="${prof.units === 'kg' ? 'on' : ''}" data-a="set-units" data-v="kg">kg</button><button class="${prof.units === 'lb' ? 'on' : ''}" data-a="set-units" data-v="lb">lb</button></div>
       </div>
+      <div class="set-row"><div><div class="l">Muscle map body</div><div class="d">Which body your muscle diagrams show</div></div>
+        <div class="seg" style="margin:0;width:170px"><button class="${(prof.quiz.bodySex || 'female') === 'female' ? 'on' : ''}" data-a="set-bodysex" data-v="female">Female</button><button class="${prof.quiz.bodySex === 'male' ? 'on' : ''}" data-a="set-bodysex" data-v="male">Male</button></div>
+      </div>
       <div class="set-row"><div><div class="l">Rest-timer ping</div><div class="d">Notify when rest ends, even off the app</div></div>
         ${!('Notification' in window) ? '<span class="muted">n/a on this phone</span>'
           : Notification.permission === 'granted' ? '<span style="color:var(--good-text);font-weight:800">On ✓</span>'
@@ -6077,6 +6257,11 @@ function dispatch(e) {
   }
   if (a === 'prof-add') { App.creating = true; App.onboarding = null; render(); return; }
   if (a === 'set-units') { prof.units = el.dataset.v; saveApp(); render(); return; }
+  if (a === 'set-bodysex') {
+    prof.quiz.bodySex = el.dataset.v === 'male' ? 'male' : 'female';
+    if (prof.coachSync) { prof.coachSync.pendingProgress = true; setTimeout(() => syncTick(true), 800); } // coach's view of you follows
+    saveApp(); render(); return;
+  }
   if (a === 'set-barkg') { prof.barKg = +el.dataset.v; saveApp(); render(); toast(`Plate maths now assumes a ${prof.barKg}kg bar 🏋️`); return; }
   if (a === 'notif-enable') {
     try {
@@ -6861,8 +7046,8 @@ function renderCoachProgress(prof) {
       const fr = muscleFreshness(shim);
       if (!Object.keys(fr).length) return '';
       return `<div class="card"><div class="row"><h3>${U.esc(pg.name)}’s muscle radar</h3><span class="spacer"></span><span class="muted">last 3 days</span></div>
-        ${MuscleMap.heat(fr)}
-        <div class="mm-key"><span><i style="background:rgba(20,22,34,0.08)"></i>Fresh</span><span><i style="background:#FFD9A8"></i>Easing off</span><span><i style="background:#FF4D3D"></i>Just worked</span></div>
+        ${MuscleMap.heat(fr, { sex: pg.quiz && pg.quiz.bodySex })}
+        <div class="mm-key"><span><i style="background:#E4E0EE"></i>Fresh</span><span><i style="background:#FFD9A8"></i>Easing off</span><span><i style="background:#FF4D3D"></i>Just worked</span></div>
       </div>`;
     })()}
     ${heatmapCardHtml(shim)}

@@ -189,9 +189,23 @@ h1, h2, h3 { line-height: 1.15; }
 .feel { display: flex; gap: 8px; margin-top: 10px; }
 .feel button { flex: 1; padding: 9px; border-radius: 11px; background: rgba(20,22,34,0.045); font-weight: 700; font-size: 13px; color: var(--ink2); }
 .feel button.on { background: var(--ink); color: #fff; }
-.wo-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 2px 10px; position: sticky; top: 0; background: var(--bg); z-index: 5; }
-.wo-topbar .t { font-weight: 900; font-size: 18px; }
-.wo-topbar .elapsed { color: var(--ink2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.wo-head { position: sticky; top: 0; z-index: 12; background: var(--bg); padding-bottom: 10px; }
+.wo-topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 2px 8px; }
+.wo-topbar .t { font-weight: 900; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wo-topbar .elapsed { color: var(--ink2); font-size: 12px; font-weight: 700; }
+
+/* glanceable "now" HUD */
+.wo-hud { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1.5px solid var(--line); border-radius: 16px; padding: 9px 12px; cursor: pointer; -webkit-tap-highlight-color: transparent; box-shadow: 0 3px 12px rgba(20,22,34,0.05); }
+.wo-hud:active { transform: scale(0.994); }
+.wo-hud-badge { flex: none; width: 46px; height: 46px; border-radius: 14px; background: var(--grad); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+.wo-hud-badge b { font-size: 19px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.wo-hud-badge i { font-style: normal; font-size: 9.5px; font-weight: 800; opacity: 0.92; letter-spacing: 0.03em; margin-top: 2px; }
+.wo-hud-mid { flex: 1; min-width: 0; }
+.wo-hud-ex { font-weight: 800; font-size: 15.5px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wo-hud-sub { font-size: 12.5px; color: var(--ink2); font-weight: 600; margin-top: 2px; }
+.wo-hud-time { flex: none; display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+.wo-hud-time span { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.wo-hud-time small { font-size: 8.5px; color: var(--ink2); font-weight: 800; letter-spacing: 0.14em; margin-top: 3px; }
 
 /* rest timer */
 .rest {
@@ -3128,6 +3142,107 @@ function workoutForWeekday(prof, wd) {
   return day ? { type: 'plan', idx, name: day.name, exercises: day.exercises } : null;
 }
 
+/* ============ day moves — "can't make it" reschedules, THIS WEEK only ============
+   prof.dayMoves = { [mondayISO]: { [fromWd]: { to: wd|null, note, ts, by, cleared } } }
+   - to: another weekday = moved there; null = skipped for the week.
+   - cleared: an undo tombstone (kept so the undo syncs across; treated as "no move").
+   - by: 'athlete' | 'coach' — athlete entries travel in the progress doc, coach
+     entries in the plan doc; on receive, newest ts wins per (week, day).
+   The weekly plan template is never touched — next week runs as normal. */
+function ensureDayMoves(p) { if (!p.dayMoves || typeof p.dayMoves !== 'object') p.dayMoves = {}; return p.dayMoves; }
+function _prevWeekKey(wk) { const d = U.parseISO(wk); d.setDate(d.getDate() - 7); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function pruneDayMoves(p) {
+  const dm = ensureDayMoves(p);
+  const wk = U.weekKey(U.todayISO()), prev = _prevWeekKey(wk);
+  for (const k of Object.keys(dm)) if (k !== wk && k !== prev) delete dm[k];
+}
+function setDayMove(p, fromWd, toWd, note, by) {
+  pruneDayMoves(p);
+  const wk = U.weekKey(U.todayISO()), dm = ensureDayMoves(p);
+  (dm[wk] = dm[wk] || {})[fromWd] = {
+    to: toWd == null ? null : U.clamp(+toWd, 0, 6),
+    note: String(note || '').slice(0, 140), ts: Date.now(), by: by === 'coach' ? 'coach' : 'athlete',
+  };
+}
+function clearDayMove(p, fromWd, by) {
+  const wk = U.weekKey(U.todayISO()), dm = ensureDayMoves(p);
+  if (dm[wk] && dm[wk][fromWd]) dm[wk][fromWd] = { cleared: true, to: null, note: '', ts: Date.now(), by: by === 'coach' ? 'coach' : 'athlete' };
+}
+function movesThisWeek(p) {
+  const dm = (p.dayMoves || {})[U.weekKey(U.todayISO())] || {};
+  const out = {};
+  for (const [wd, e] of Object.entries(dm)) if (e && !e.cleared) out[+wd] = e;
+  return out;
+}
+function moveTargetsThisWeek(p) { // wd → the weekday whose session moved here
+  const mv = movesThisWeek(p), t = {};
+  for (const [from, e] of Object.entries(mv)) if (e.to != null && +e.to !== +from) t[+e.to] = +from;
+  return t;
+}
+function effActivityOn(p, wd) { // activityOn with this week's moves applied
+  const base = activityOn(p, wd);
+  if (base == null) return base;
+  if (moveTargetsThisWeek(p)[wd] != null) return 'lift';
+  if (movesThisWeek(p)[wd]) return 'rest'; // its session moved away or was skipped
+  return base;
+}
+function effWorkoutForWeekday(p, wd) {
+  const src = moveTargetsThisWeek(p)[wd];
+  if (src != null) return workoutForWeekday(p, src);
+  if (movesThisWeek(p)[wd]) return null;
+  return workoutForWeekday(p, wd);
+}
+/* next lift from today inclusive, move-aware inside this week; beyond Sunday the
+   base schedule applies (moves never carry into next week) */
+function effNextLiftInfo(p) {
+  const sched = p.quiz.weekSchedule;
+  if (!sched || !p.plan) return null;
+  const map = p.plan.dayMap || {};
+  const t = todayWeekday();
+  for (let i = 0; i < 7; i++) {
+    const dayIdx = t + i, wd = dayIdx % 7, inWeek = dayIdx < 7;
+    const act = inWeek ? effActivityOn(p, wd) : (sched[wd] || 'rest');
+    if (act === 'lift') {
+      const src = inWeek && moveTargetsThisWeek(p)[wd] != null ? moveTargetsThisWeek(p)[wd] : wd;
+      const w4d = inWeek ? effWorkoutForWeekday(p, wd) : workoutForWeekday(p, wd);
+      return { wd, srcWd: src, inDays: i, planIdx: map[src] != null ? map[src] : 0, name: (w4d || {}).name || '' };
+    }
+  }
+  return null;
+}
+function ownDayMoves(p, by) { // subset an outgoing sync doc carries (incl. tombstones)
+  pruneDayMoves(p);
+  const out = {};
+  for (const [wk, days] of Object.entries(p.dayMoves || {}))
+    for (const [wd, e] of Object.entries(days || {})) {
+      if (!e || e.by !== by) continue;
+      (out[wk] = out[wk] || {})[wd] = { to: e.to == null ? null : +e.to, note: e.note || '', ts: e.ts, by: e.by, cleared: !!e.cleared };
+    }
+  return out;
+}
+function mergeDayMoves(p, incoming) { // newest ts wins per (week, day); sanitises as it goes
+  if (!incoming || typeof incoming !== 'object') return false;
+  const dm = ensureDayMoves(p);
+  let changed = false;
+  for (const [wk, days] of Object.entries(incoming)) {
+    if (!days || typeof days !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(wk)) continue;
+    for (const [wd, e] of Object.entries(days)) {
+      if (!e || typeof e.ts !== 'number' || !(+wd >= 0 && +wd <= 6)) continue;
+      const cur = (dm[wk] || {})[wd];
+      if (!cur || e.ts > cur.ts) {
+        (dm[wk] = dm[wk] || {})[wd] = {
+          to: e.to == null ? null : U.clamp(+e.to, 0, 6),
+          note: String(e.note || '').slice(0, 140), ts: e.ts,
+          by: e.by === 'coach' ? 'coach' : 'athlete', cleared: !!e.cleared,
+        };
+        changed = true;
+      }
+    }
+  }
+  pruneDayMoves(p);
+  return changed;
+}
+
 /* ---- program & week tracker ---- */
 function programOf(prof) {
   if (!prof.program || typeof prof.program.n !== 'number') prof.program = { n: 1, start: U.weekKey((prof.createdAt) || U.todayISO()) };
@@ -3179,6 +3294,7 @@ function migrateProfile(p) {
   if (!p.flags) p.flags = {};
   if (!p.program || typeof p.program.n !== 'number') p.program = { n: 1, start: U.weekKey(p.createdAt || U.todayISO()) };
   if (!p.customMap) p.customMap = {};
+  if (!p.dayMoves) p.dayMoves = {};
   if (!p.exPrefs) p.exPrefs = {};
   if (!p.badges) p.badges = {};
   if (!p.bodyLogs) p.bodyLogs = [];
@@ -3307,6 +3423,8 @@ function coachTips(profile) {
 if (typeof module !== 'undefined') module.exports = Object.assign(module.exports || {}, {
   ATHLETE_TYPES, ACTIVITIES, WEEKDAYS, WEEKDAYS_FULL, defaultSchedule, scheduleFromDays, liftDaysOf,
   dayLegScore, assignDayMap, migrateProfile, recentWins, coachTips, nextLiftInfo, workoutForWeekday,
+  setDayMove, clearDayMove, movesThisWeek, moveTargetsThisWeek, effActivityOn, effWorkoutForWeekday,
+  effNextLiftInfo, ownDayMoves, mergeDayMoves, pruneDayMoves, todayWeekday,
 });
 
 
@@ -3625,6 +3743,7 @@ function buildPlanDoc(prof) { // coach workspace → athlete
       exercises: (c.exercises || []).map(packPe),
     })),
     customMap: prof.customMap || {},
+    dayMoves: ownDayMoves(prof, 'coach'), // coach's this-week move/skip adjustments
     program: prof.program || null,
   };
 }
@@ -3675,6 +3794,9 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
       prof.program = { n: doc.program.n, start: doc.program.start || cur.start || U.weekKey(U.todayISO()) };
     }
   }
+  // coach's this-week move/skip adjustments — newest change per day wins, so the
+  // athlete's own more recent reschedules (or undos) survive a plan apply
+  mergeDayMoves(prof, doc.dayMoves);
   prof.coachName = doc.coach || 'Your coach';
   const newMsg = doc.msg || '';
   if (newMsg && newMsg !== prof.coachMsg) { prof.coachMsgSeen = false; prof.coachMsgReact = null; }
@@ -3709,6 +3831,7 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
       entries: (l.entries || []).map(e => ({ exId: e.exId, sets: (e.sets || []).map(s => ({ w: s.w || 0, reps: s.reps || 0 })) })),
     })),
     msgReact: prof.coachMsgReact || null,
+    dayMoves: ownDayMoves(prof, 'athlete'), // her this-week reschedules/skips, for the coach
     sportLogs: (prof.sportLogs || []).filter(s => s.date >= cut).slice(-90),
     prs: prof.prs || {},
     exTop,
@@ -3762,6 +3885,10 @@ async function coachSyncTick(prof, force) {
     const full = await syncRpc('lo_pull', { p_key: co.key });
     if (full && full.progress) {
       co.progress = full.progress; co.progressRev = full.progressRev; co.progressAt = full.progressAt;
+      // her reschedules land in the workspace so "their week" reads true. Her entries
+      // are by:'athlete', so the coach's outgoing plan doc (coach-only) is untouched
+      // and this never re-triggers a plan push by itself.
+      mergeDayMoves(prof, full.progress.dayMoves);
       // first contact: adopt her setup so the editor works with HER kit and goals
       if (!co.adoptedQuiz && full.progress.quiz) {
         const q = full.progress.quiz;
@@ -3977,7 +4104,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.4.1';
+const APP_VERSION = '3.6.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4581,22 +4708,42 @@ function weekStripHtml(prof) {
   if (!sched) return '';
   const t = todayWeekday();
   const mon = U.parseISO(U.weekKey(U.todayISO()));
+  const mv = movesThisWeek(prof);
   let out = '<div class="week-strip">';
   for (let d = 0; d < 7; d++) {
     const dt = new Date(mon); dt.setDate(mon.getDate() + d);
     const iso = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
-    const act = sched[d] || 'rest';
+    const act = effActivityOn(prof, d) || 'rest';
     const done = act === 'lift' ? (prof.logs || []).some(l => l.date === iso) : (act !== 'rest' && sportDoneOn(prof, iso, act));
+    const glyph = done ? '✓' : mv[d] ? (mv[d].to == null ? '–' : '↷') : ACTIVITIES[act].emoji;
     out += `<div class="ws-day ${d === t ? 'today' : ''} ${done ? 'done' : ''}">
-      <span class="ws-l">${WEEKDAYS[d][0]}</span><span class="ws-e">${done ? '✓' : ACTIVITIES[act].emoji}</span></div>`;
+      <span class="ws-l">${WEEKDAYS[d][0]}</span><span class="ws-e">${glyph}</span></div>`;
   }
   return out + '</div>';
 }
 
+/* one-liner summary of this week's reschedules, e.g. "Tue → Thu (you) · Fri skipped (Coach)" */
+function dayMoveSummaryHtml(prof) {
+  const mv = movesThisWeek(prof);
+  const wds = Object.keys(mv).map(Number).sort((a, b) => a - b);
+  if (!wds.length) return '';
+  const isCoach = !!prof.isCoach;
+  const who = e => e.by === 'athlete'
+    ? (isCoach ? U.esc((prof.coachOf && prof.coachOf.athleteName) || 'them') : 'you')
+    : (isCoach ? 'you' : U.esc(prof.coachName || 'coach'));
+  const bits = wds.map(d => {
+    const e = mv[d];
+    return `<b>${WEEKDAYS[d]}</b> ${e.to == null ? 'skipped' : '→ ' + WEEKDAYS[e.to]} (${who(e)})${e.note ? ` · “${U.esc(e.note)}”` : ''}`;
+  });
+  return `<div class="muted mt8" style="font-size:12px;line-height:1.55">🗓 This week: ${bits.join(' · ')}</div>`;
+}
+
 function renderToday(prof) {
   const wd = todayWeekday();
-  const act = activityOn(prof, wd) || 'lift';
-  const nl = nextLiftInfo(prof);
+  const act = effActivityOn(prof, wd) || 'lift';
+  const nl = effNextLiftInfo(prof);
+  const mvToday = movesThisWeek(prof)[wd] || null;   // today's session moved away / skipped
+  const mvHere = moveTargetsThisWeek(prof)[wd];      // another day's session moved to today
   const todayISO = U.todayISO();
   const liftedToday = (prof.logs || []).some(l => l.date === todayISO);
   const wk = weekDots(prof);
@@ -4621,7 +4768,7 @@ function renderToday(prof) {
       </div>
     </div>`;
   } else if (act === 'lift' && nl && nl.inDays === 0 && !liftedToday) {
-    const w4d = workoutForWeekday(prof, wd) || { type: 'plan', idx: nl.planIdx, name: prof.plan.days[nl.planIdx].name, exercises: prof.plan.days[nl.planIdx].exercises };
+    const w4d = effWorkoutForWeekday(prof, wd) || { type: 'plan', idx: nl.planIdx, name: prof.plan.days[nl.planIdx].name, exercises: prof.plan.days[nl.planIdx].exercises };
     const day = { name: w4d.name, exercises: w4d.exercises };
     const dayList = day.exercises.slice(0, 6).map(pe => {
       const ex = EX_BY_ID[pe.exId];
@@ -4632,7 +4779,7 @@ function renderToday(prof) {
       </div>`;
     }).join('');
     hero = `<div class="card hero">
-      <div class="kicker">Today · lift day${w4d.type === 'custom' ? ' · your build 🛠️' : ''}</div>
+      <div class="kicker">Today · lift day${w4d.type === 'custom' ? ' · your build 🛠️' : ''}${mvHere != null ? ` · moved from ${WEEKDAYS[mvHere]} ↷` : ''}</div>
       <h2 style="font-size:24px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">${U.esc(day.name)}</h2>
       <div style="font-size:13px;opacity:.92;position:relative;z-index:1">${day.exercises.length} exercises · ~${estMinutes(day)} min · ${w4d.type === 'custom' ? 'Custom workout' : GOALS[prof.plan.goal].label}</div>
       <div class="mt12" style="position:relative;z-index:1">${dayList}</div>
@@ -4642,9 +4789,12 @@ function renderToday(prof) {
           : `<button class="btn onhero" style="flex:1" data-a="start-workout" data-idx="${w4d.idx}">Start workout</button>`}
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="choose-day">Switch</button>
       </div>
-      <button class="trim-link" data-a="trim-open" data-mode="${w4d.type}" data-idx="${w4d.idx != null ? w4d.idx : ''}" data-id="${w4d.id || ''}">⚡ Short on time today?</button>
+      <div class="row" style="position:relative;z-index:1;gap:0">
+        <button class="trim-link" style="flex:1" data-a="trim-open" data-mode="${w4d.type}" data-idx="${w4d.idx != null ? w4d.idx : ''}" data-id="${w4d.id || ''}">⚡ Short on time?</button>
+        <button class="trim-link" style="flex:1" data-a="dm-cant-open">🗓 Can't train today?</button>
+      </div>
     </div>`;
-  } else if (act === 'lift' && liftedToday) {
+  } else if ((act === 'lift' || mvToday) && liftedToday) {
     hero = `<div class="card hero">
       <div class="kicker">Today</div>
       <h2 style="font-size:23px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">Done for today 🎉</h2>
@@ -4653,12 +4803,26 @@ function renderToday(prof) {
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="choose-day">Extra session?</button>
       </div>
     </div>`;
+  } else if (act === 'rest' && mvToday) {
+    const skipped = mvToday.to == null;
+    const srcName = (workoutForWeekday(prof, wd) || {}).name || 'Your session';
+    const who = mvToday.by === 'athlete' ? 'You' : U.esc(prof.coachName || 'Your coach');
+    hero = `<div class="card hero-rest">
+      <div class="kicker">Today · ${skipped ? 'session skipped' : 'session moved'}</div>
+      <h2 style="font-size:23px;font-weight:900;margin:5px 0 2px">${skipped ? 'Resting instead 😌' : `Moved to ${WEEKDAYS_FULL[mvToday.to]} ↷`}</h2>
+      <div class="hero-rest-tx">${who} ${skipped ? `skipped <b>${U.esc(srcName)}</b> this week — no stress, life happens. Next week runs as normal.` : `moved <b>${U.esc(srcName)}</b> to ${WEEKDAYS_FULL[mvToday.to]} — just for this week.`}${mvToday.note ? `<br>📝 “${U.esc(mvToday.note)}”` : ''}</div>
+      ${nl ? `<div class="next-lift">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc(nl.name || '')}</div>` : ''}
+      <div class="row mt12">
+        <button class="btn sm ghost" data-a="dm-undo" data-from="${wd}">↩ Undo</button>
+        <button class="btn sm ghost" data-a="choose-day">Lift anyway</button>
+      </div>
+    </div>`;
   } else if (act === 'rest') {
     hero = `<div class="card hero-rest">
       <div class="kicker">Today · rest day</div>
       <h2 style="font-size:23px;font-weight:900;margin:5px 0 2px">Recovery day 😌</h2>
       <div class="hero-rest-tx">Rest is where muscles are actually built. Eat well, sleep well — you've earned it.</div>
-      ${nl ? `<div class="next-lift">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc((workoutForWeekday(prof, nl.wd) || {}).name || '')}</div>` : ''}
+      ${nl ? `<div class="next-lift">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc(nl.name || '')}</div>` : ''}
       <div class="row mt12"><button class="btn sm ghost" data-a="choose-day">Feeling fresh? Lift anyway</button></div>
     </div>`;
   } else {
@@ -4668,7 +4832,7 @@ function renderToday(prof) {
       <div class="kicker" style="color:rgba(255,255,255,0.85)">Today · ${U.esc(ACTIVITIES[act].label.toLowerCase())} day</div>
       <h2 style="font-size:23px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">${ACTIVITIES[act].emoji} ${U.esc(label)}</h2>
       <div style="font-size:13.5px;opacity:.95;position:relative;z-index:1;line-height:1.5">${done ? 'Banked! Great work — recovery is now the workout.' : 'The plan keeps your legs fresh for this — go enjoy it.'}</div>
-      ${nl ? `<div class="next-lift" style="position:relative;z-index:1;color:rgba(255,255,255,0.9)">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc((workoutForWeekday(prof, nl.wd) || {}).name || '')}</div>` : ''}
+      ${nl ? `<div class="next-lift" style="position:relative;z-index:1;color:rgba(255,255,255,0.9)">Next lift: <b>${nl.inDays === 1 ? 'tomorrow' : WEEKDAYS_FULL[nl.wd]}</b> · ${U.esc(nl.name || '')}</div>` : ''}
       <div class="row mt16" style="position:relative;z-index:1">
         <button class="btn onhero" style="flex:1;color:#6B3FD9" data-a="sport-done" data-act="${act}">${done ? '✓ Done — tap to undo' : 'Mark it done ✓'}</button>
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="choose-day">Lift instead</button>
@@ -4692,6 +4856,7 @@ function renderToday(prof) {
     <div class="card">
       <div class="row"><h3>This week</h3><span class="spacer"></span><span class="muted">${wk.done}/${wk.target} lifts</span></div>
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
+      ${dayMoveSummaryHtml(prof)}
       ${lastLog ? `<div class="muted mt8">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</div>` : ''}
     </div>
     ${(() => {
@@ -4718,17 +4883,48 @@ function renderToday(prof) {
 /* ============================================================
    WORKOUT MODE
 ============================================================ */
+// Glanceable "now" strip: which exercise you're on (N of M), its name, the set
+// you're up to, and the running session time — so a propped-up phone reads like
+// a workout dashboard without scrolling. Regenerated every render(), so it tracks
+// progress as sets are ticked. Tapping it jumps to the active set card.
+function workoutHudHtml(prof, w) {
+  const entries = w.entries;
+  let idx = entries.findIndex(e => e.sets.some(s => !s.done));
+  const allDone = idx === -1;
+  if (allDone) idx = Math.max(0, entries.length - 1);
+  const e = entries[idx];
+  const ex = EX_BY_ID[e.exId];
+  const setTotal = e.sets.length;
+  const setDone = e.sets.filter(s => s.done).length;
+  const curSet = Math.min(setDone + 1, setTotal);
+  const sub = allDone
+    ? 'All sets done — hit Finish 🎉'
+    : `Set ${curSet} of ${setTotal}${ex.timed ? ' · hold' : ''}${e.plan && e.plan.ssWithNext ? ' · 🔗 superset' : ''}`;
+  return `<div class="wo-hud" data-a="wo-goto-active" role="button" title="Jump to this set">
+    <div class="wo-hud-badge">${allDone ? '<b>✓</b>' : `<b>${idx + 1}</b><i>of ${entries.length}</i>`}</div>
+    <div class="wo-hud-mid">
+      <div class="wo-hud-ex">${U.esc(ex.name)}</div>
+      <div class="wo-hud-sub">${sub}</div>
+    </div>
+    <div class="wo-hud-time"><span id="wo-elapsed">0:00</span><small>SESSION</small></div>
+  </div>`;
+}
+
 function renderWorkout(prof) {
   const w = App.workout;
   const doneSets = w.entries.reduce((t, e) => t + e.sets.filter(s => s.done).length, 0);
   const totalSets = w.entries.reduce((t, e) => t + e.sets.length, 0);
+  const flags = `${w.easy ? '🧘 easy week' : ''}${w.easy && w.trimmed ? ' · ' : ''}${w.trimmed ? '⚡ ~' + w.trimmed + ' min' : ''}`;
   return `<div class="screen">
-    <div class="wo-topbar">
-      <button class="iconbtn" data-a="wo-exit">✕</button>
-      <div style="text-align:center"><div class="t">${U.esc(w.dayName)}</div><div class="elapsed" id="wo-elapsed">0:00${w.easy ? ' · 🧘 easy week' : ''}${w.trimmed ? ' · ⚡ ~' + w.trimmed + ' min' : ''}</div></div>
-      <button class="btn sm dark" data-a="wo-finish">Finish</button>
+    <div class="wo-head">
+      <div class="wo-topbar">
+        <button class="iconbtn" data-a="wo-exit">✕</button>
+        <div style="text-align:center;flex:1;min-width:0"><div class="t">${U.esc(w.dayName)}</div>${flags ? `<div class="elapsed">${flags}</div>` : ''}</div>
+        <button class="btn sm dark" data-a="wo-finish">Finish</button>
+      </div>
+      ${workoutHudHtml(prof, w)}
+      <div class="ob-progress" style="margin:9px 0 0"><i style="width:${totalSets ? doneSets / totalSets * 100 : 0}%"></i></div>
     </div>
-    <div class="ob-progress" style="margin:2px 0 14px"><i style="width:${totalSets ? doneSets / totalSets * 100 : 0}%"></i></div>
     ${w.coachNote ? `<div class="coach-note">📝 <b>${U.esc(prof.coachName || 'Coach')}:</b> ${U.esc(w.coachNote)}</div>` : ''}
     ${warmupCardHtml(w)}
     ${w.entries.map((e, ei) => renderWorkoutEx(prof, e, ei)).join('')}
@@ -4896,6 +5092,11 @@ function stepSize(ex, units) {
 function workoutAction(a, el, prof) {
   const w = App.workout;
   if (a === 'start-workout') { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); return; }
+  if (a === 'wo-goto-active') {
+    const card = document.querySelector('.wo-ex.active') || document.querySelector('.wo-ex:not(.done-ex)');
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
   if (a === 'wo-exit') {
     const done = w.entries.reduce((t, e) => t + e.sets.filter(x => x.done).length, 0);
     const total = w.entries.reduce((t, e) => t + e.sets.length, 0);
@@ -5337,6 +5538,8 @@ function renderPlanView(prof) {
       }).join('')}
       </div>
       <div class="muted mt8" style="font-size:11.5px">Tap a lift day to swap in a custom workout.</div>
+      ${dayMoveSummaryHtml(prof)}
+      <button class="btn sm ghost mt8" data-a="dm-adjust-open">🗓 Life happened? Adjust this week</button>
     </div>` : '';
   const coachOf = prof.isCoach && prof.coachOf;
   return `<div class="screen">
@@ -5668,6 +5871,8 @@ function dispatch(e) {
   if (a.startsWith('co-')) return coachAction(a, el, prof);
   // v2.7: mobility — warm-up/cooldown rows + relief tool
   if (a.startsWith('mob-')) return mobAction(a, el, prof);
+  // v3.6: "life happened" day moves — reschedule / skip / undo, both roles
+  if (a.startsWith('dm-')) return dmAction(a, el, prof);
   // sheets
   if (a === 'sheet-close') return closeSheet();
   if (a === 'tab') { App.view = el.dataset.id; closeSheet(); App._scrollTop = true; render(); return; }
@@ -5678,7 +5883,7 @@ function dispatch(e) {
   // custom workout actions
   if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
-  if (['wo-exit', 'wo-pause', 'wo-discard-ask', 'wo-resume', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'rest-add', 'rest-skip'].includes(a))
+  if (['wo-exit', 'wo-pause', 'wo-discard-ask', 'wo-resume', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'wo-goto-active', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
   if (a === 'do-swap') {
     const ei = +el.dataset.ei;
@@ -6602,6 +6807,9 @@ function renderCoachHome(prof) {
         <button class="btn sm" style="background:rgba(255,255,255,0.18);color:#fff" data-a="co-showcode">Pair code</button>
       </div>
     </div>
+    ${(() => { const s = dayMoveSummaryHtml(prof); return s ? `<div class="card">
+      <div class="row"><h3>🗓 This week's changes</h3></div>${s}
+      <button class="btn sm ghost mt8" data-a="dm-adjust-open">Adjust their week</button></div>` : ''; })()}
     <div class="card">
       <div class="row"><h3>Message on their Today screen</h3></div>
       <textarea class="ob-input" id="co-msg" rows="2" maxlength="500" placeholder="e.g. Big week — focus on slow reps. Proud of you 🧡" style="width:100%;margin-top:10px;resize:vertical;font-size:14px">${U.esc(prof.coachMsg || '')}</textarea>
@@ -6721,6 +6929,108 @@ function coachMsgCardHtml(prof) {
       <button class="btn ghost sm" data-a="co-dismiss-msg">Got it</button>
     </div></div>
   </div>`;
+}
+
+/* ============ day moves — "life happened" reschedule/skip, both sides ============ */
+function _wdISOThisWeek(d) {
+  const mon = U.parseISO(U.weekKey(U.todayISO()));
+  const dt = new Date(mon); dt.setDate(mon.getDate() + d);
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+function _dmLogs(prof) { // whose training log tells us a day is done
+  return prof.isCoach ? ((prof.coachOf && prof.coachOf.progress && prof.coachOf.progress.logs) || []) : (prof.logs || []);
+}
+
+/* pick which session to adjust: every base lift day this week with its status */
+function showWeekAdjustSheet(prof) {
+  const sched = prof.quiz.weekSchedule || {};
+  const mv = movesThisWeek(prof);
+  const logs = _dmLogs(prof);
+  const t = todayWeekday();
+  const isCoach = !!prof.isCoach;
+  const rows = [];
+  for (let d = 0; d < 7; d++) {
+    if ((sched[d] || 'rest') !== 'lift') continue;
+    const w4d = workoutForWeekday(prof, d);
+    const e = mv[d];
+    const effDay = e && e.to != null ? e.to : d;
+    const done = e && e.to == null ? false : logs.some(l => l.date === _wdISOThisWeek(effDay));
+    const status = done ? '✓ done' : e ? (e.to == null ? 'skipped' : `→ ${WEEKDAYS[e.to]} ↷`) : (d < t ? 'was planned' : d === t ? 'today' : 'planned');
+    rows.push(`<button class="prof-row" style="width:100%;text-align:left" data-a="dm-day-open" data-from="${d}" ${done ? 'disabled style="width:100%;text-align:left;opacity:.5"' : ''}>
+      <span class="em" style="border-radius:14px;font-size:17px">${done ? '✅' : e ? (e.to == null ? '💤' : '↷') : '🏋️'}</span>
+      <span style="flex:1;min-width:0"><div class="nm">${WEEKDAYS_FULL[d]}</div>
+      <div class="meta">${U.esc((w4d || {}).name || 'Lift')} · ${status}</div></span>
+      ${done ? '' : '<span class="muted" style="font-size:18px">›</span>'}
+    </button>`);
+  }
+  showSheet(`<h3 style="font-size:19px;font-weight:900">🗓 Adjust this week</h3>
+    <p class="muted mt8" style="margin-bottom:10px">${isCoach ? `Move or skip one of ${U.esc((prof.coachOf || {}).athleteName || 'their')}’s sessions — this week only, the plan itself stays put.` : 'Can’t make a day? Move it or skip it — this week only, next week runs as normal.'}</p>
+    ${rows.join('') || '<p class="muted">No lift days on the schedule this week.</p>'}
+    <button class="btn ghost block mt8" data-a="sheet-close">Done</button>`);
+}
+
+/* move/skip one day: free-day targets + skip + optional note + undo */
+function showMoveDaySheet(prof, fromWd) {
+  const isCoach = !!prof.isCoach;
+  const t = todayWeekday();
+  const mv = movesThisWeek(prof);
+  const e = mv[fromWd];
+  const w4d = workoutForWeekday(prof, fromWd);
+  const name = (w4d || {}).name || 'this session';
+  const targets = [];
+  for (let d = 0; d < 7; d++) {
+    if (d === fromWd || d < t) continue;
+    if ((effActivityOn(prof, d) || 'rest') !== 'rest') continue;
+    targets.push(d);
+  }
+  const whoSees = isCoach
+    ? `Syncs to ${U.esc((prof.coachOf || {}).athleteName || 'their')}’s phone — they’ll see it on their Today screen.`
+    : (prof.coachSync ? 'Your coach will see this, including your note.' : 'Just for this week — next week is untouched.');
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${isCoach ? `Adjust ${WEEKDAYS_FULL[fromWd]}` : (fromWd === t ? 'Can’t train today?' : `Can’t make ${WEEKDAYS_FULL[fromWd]}?`)}</h3>
+    <p class="muted mt8" style="margin-bottom:4px"><b>${U.esc(name)}</b> · ${WEEKDAYS_FULL[fromWd]}${e ? (e.to == null ? ' · currently skipped' : ` · currently moved to ${WEEKDAYS_FULL[e.to]}`) : ''}</p>
+    <p class="muted" style="font-size:12px;margin-bottom:10px">${whoSees}</p>
+    <input class="ob-input" id="dm-note" maxlength="140" placeholder="Optional note — e.g. work ran over" autocomplete="off" style="margin-bottom:10px">
+    ${targets.length ? targets.map(d => `<button class="btn ghost block mt8" data-a="dm-move" data-from="${fromWd}" data-to="${d}">↷ Move to ${WEEKDAYS_FULL[d]}${d === t ? ' (today)' : ''}</button>`).join('')
+      : '<p class="muted" style="font-size:12.5px">No free days left this week to move it to — you can still skip it.</p>'}
+    <button class="btn block mt8" style="background:#FBE9E7;color:#C0302C" data-a="dm-skip" data-from="${fromWd}">💤 Skip it this week</button>
+    ${e ? `<button class="btn ghost block mt8" data-a="dm-undo" data-from="${fromWd}">↩ Undo — back to ${WEEKDAYS_FULL[fromWd]}</button>` : ''}
+    <button class="btn ghost block mt8" data-a="sheet-close">Cancel</button>`);
+}
+
+function dmAction(a, el, prof) {
+  const by = prof.isCoach ? 'coach' : 'athlete';
+  const after = msg => {
+    closeSheet();
+    if (prof.isCoach) coachMaybeDirty(prof);
+    else if (prof.coachSync) { prof.coachSync.pendingProgress = true; setTimeout(() => syncTick(true), 600); }
+    saveApp(); render();
+    toast(msg);
+  };
+  if (a === 'dm-cant-open') {
+    const t = todayWeekday();
+    const src = moveTargetsThisWeek(prof)[t];
+    showMoveDaySheet(prof, src != null ? src : t);
+    return;
+  }
+  if (a === 'dm-adjust-open') { showWeekAdjustSheet(prof); return; }
+  if (a === 'dm-day-open') { showMoveDaySheet(prof, +el.dataset.from); return; }
+  const noteEl = document.getElementById('dm-note');
+  const note = noteEl ? noteEl.value.trim() : '';
+  if (a === 'dm-move') {
+    setDayMove(prof, +el.dataset.from, +el.dataset.to, note, by);
+    after(`Moved to ${WEEKDAYS_FULL[+el.dataset.to]} ↷ — this week only${prof.isCoach ? ' · syncing to their phone' : prof.coachSync ? ' · your coach will see it' : ''}`);
+    return;
+  }
+  if (a === 'dm-skip') {
+    setDayMove(prof, +el.dataset.from, null, note, by);
+    after(`Skipped this week 💜 — next week runs as normal${prof.isCoach ? ' · syncing to their phone' : prof.coachSync ? ' · your coach will see it' : ''}`);
+    return;
+  }
+  if (a === 'dm-undo') {
+    clearDayMove(prof, +el.dataset.from, by);
+    after('Change undone ↩ — back to the usual plan');
+    return;
+  }
 }
 
 /* ---------- dispatch ---------- */

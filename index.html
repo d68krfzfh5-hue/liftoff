@@ -4280,7 +4280,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.8.0';
+const APP_VERSION = '3.8.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4900,17 +4900,24 @@ function weekStripHtml(prof) {
   return out + '</div>';
 }
 
-/* ---- tap a week-strip day → what you did / what's coming ---- */
+/* ---- tap a week day → what you did / what's coming ----
+   Works on the athlete's own data, and in a coach workspace it reads the
+   client's synced progress (logs, PRs, sport days, units) instead. */
 function showDayPeekSheet(prof, d) {
   const t = todayWeekday();
   const mon = U.parseISO(U.weekKey(U.todayISO()));
   const dt = new Date(mon); dt.setDate(mon.getDate() + d);
   const iso = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
-  const u = prof.units;
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const pg = isCoach ? (prof.coachOf.progress || {}) : null;
+  const src = isCoach
+    ? { logs: pg.logs || [], prs: pg.prs || {}, sportLogs: pg.sportLogs || [], units: pg.units || prof.units, exTop: pg.exTop || {} }
+    : { logs: prof.logs || [], prs: prof.prs || {}, sportLogs: prof.sportLogs || [], units: prof.units, exTop: null };
+  const u = src.units;
   const act = effActivityOn(prof, d) || 'rest';
   const mv = movesThisWeek(prof)[d];
   const mvHere = moveTargetsThisWeek(prof)[d];
-  const dayLogs = (prof.logs || []).filter(l => l.date === iso);
+  const dayLogs = src.logs.filter(l => l.date === iso);
   const when = d < t ? 'past' : d === t ? 'today' : 'future';
   const setStr = (ex, s) => ex.timed ? `${s.reps}s` : `${s.w > 0 ? U.fmtW(s.w, u) + '×' : 'BW×'}${s.reps}`;
   let body = '';
@@ -4929,7 +4936,7 @@ function showDayPeekSheet(prof, d) {
       }).join('')}
       </div>
       ${l.note ? `<div class="coach-note" style="margin-top:8px">📝 ${U.esc(l.note)}</div>` : ''}`).join('');
-    const prsToday = Object.entries(prof.prs || {}).filter(([, p]) => p.date === iso);
+    const prsToday = Object.entries(src.prs).filter(([, p]) => p.date === iso);
     if (prsToday.length) body += `<div class="mt8" style="font-weight:800;font-size:13px">🏅 New best${prsToday.length > 1 ? 's' : ''}: ${prsToday.map(([id, p]) => `${U.esc((EX_BY_ID[id] || {}).name || id)} ${U.fmtW(p.w, u)}${U.unitLabel(u)}`).join(' · ')}</div>`;
   } else if (act === 'lift') {
     const w4d = effWorkoutForWeekday(prof, d);
@@ -4940,23 +4947,26 @@ function showDayPeekSheet(prof, d) {
         <div class="mt8">
         ${day.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
-          const tg = nextTargets(prof, pe);
+          const tg = isCoach ? { w: (src.exTop[pe.exId] || {}).w } : nextTargets(prof, pe);
           return `<div class="plan-ex"><span class="dot"></span>${U.esc(ex.name)}
             <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${tg.w ? ' @ ' + U.fmtW(tg.w, u) + U.unitLabel(u) : ''}</span></div>`;
         }).join('')}
         </div>
-        ${when === 'today'
+        ${when === 'today' && !isCoach
           ? `<button class="btn primary block mt12" data-a="${w4d.type === 'custom' ? 'start-custom' : 'start-workout'}" ${w4d.type === 'custom' ? `data-id="${w4d.id}"` : `data-idx="${w4d.idx}"`}>Start workout</button>`
-          : `<button class="btn ghost block mt12" data-a="dm-day-open" data-from="${mvHere != null ? mvHere : d}">🗓 ${when === 'past' ? 'Life happened? Move or skip it' : 'Can’t make it? Move or skip'}</button>`}`;
+          : `<button class="btn ghost block mt12" data-a="dm-day-open" data-from="${mvHere != null ? mvHere : d}">🗓 ${isCoach ? 'Move or skip this day' : when === 'past' ? 'Life happened? Move or skip it' : 'Can’t make it? Move or skip'}</button>`}
+        ${(prof.quiz.weekSchedule || {})[d] === 'lift' && prof.plan ? `<button class="btn ghost block mt8" data-a="day-override-open" data-d="${d}">🔁 Swap this day’s workout</button>` : ''}`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
-    const done = sportDoneOn(prof, iso, act);
+    const done = src.sportLogs.some(s => s.date === iso && s.act === act);
     body = `<div style="font-weight:800;font-size:14.5px">${ACTIVITIES[act].emoji} ${U.esc(sportLabelFor(prof, act))}</div>
       <div class="muted mt8" style="font-size:13px">${done ? '✓ Done — banked.' : when === 'past' ? 'Was on the plan for this day.' : 'On the plan — the lifting schedule works around it.'}</div>`;
   } else if (mv) {
     const skipped = mv.to == null;
     const srcName = (workoutForWeekday(prof, d) || {}).name || 'The session';
-    const who = mv.by === 'athlete' ? 'You' : U.esc(prof.coachName || 'Your coach');
+    const who = mv.by === 'athlete'
+      ? (isCoach ? U.esc(prof.coachOf.athleteName || 'They') : 'You')
+      : (isCoach ? 'You' : U.esc(prof.coachName || 'Your coach'));
     body = `<div style="font-weight:800;font-size:14.5px">${skipped ? '💤 Skipped this week' : `↷ Moved to ${WEEKDAYS_FULL[mv.to]}`}</div>
       <div class="muted mt8" style="font-size:13px;line-height:1.5">${who} ${skipped ? `skipped <b>${U.esc(srcName)}</b> — just this week, next week runs as normal.` : `moved <b>${U.esc(srcName)}</b> to ${WEEKDAYS_FULL[mv.to]} — just this week.`}${mv.note ? `<br>📝 “${U.esc(mv.note)}”` : ''}</div>
       <button class="btn ghost block mt12" data-a="dm-undo" data-from="${d}">↩ Undo — back to ${WEEKDAYS_FULL[d]}</button>`;
@@ -5780,12 +5790,10 @@ function renderPlanView(prof) {
         const glyph = isLift ? (w4d && w4d.type === 'custom' ? '🛠️' : '🏋️') : ACTIVITIES[act].emoji;
         const sub = isLift ? (w4d ? w4d.name : 'Lift') : (act === 'rest' ? 'Rest' : sportLabelFor(prof, act));
         const cls = `pw-day${isLift ? ' lift' : ''}${d === td ? ' today' : ''}`;
-        return isLift
-          ? `<button class="${cls}" data-a="day-override-open" data-d="${d}"><span class="pw-l">${wd}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span></button>`
-          : `<div class="${cls}"><span class="pw-l">${wd}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span></div>`;
+        return `<button class="${cls}" data-a="day-peek" data-d="${d}"><span class="pw-l">${wd}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span></button>`;
       }).join('')}
       </div>
-      <div class="muted mt8" style="font-size:11.5px">Tap a lift day to swap in a custom workout.</div>
+      <div class="muted mt8" style="font-size:11.5px">Tap a day to see it — done, planned, or coming up. Swapping workouts lives in there too.</div>
       ${dayMoveSummaryHtml(prof)}
       <button class="btn sm ghost mt8" data-a="dm-adjust-open">🗓 Life happened? Adjust this week</button>
     </div>` : '';

@@ -3852,6 +3852,48 @@ async function syncRpc(name, body) {
   return t && t !== 'null' ? JSON.parse(t) : null;
 }
 
+/* ---------- rest-timer web push (server-scheduled) ----------
+   iOS freezes a backgrounded PWA's JS, so a local notification can never fire
+   while the phone is locked. Instead the app books a push with the sync server
+   when rest starts (lo_schedule_ping) and cancels it if rest finishes on
+   screen — the server delivers at the right moment via Web Push, which reaches
+   the lock screen and mirrors to a paired Apple Watch. */
+const PUSH_PUBKEY = 'BAlgUUOrYXbikn3FCoIwoL4amM52nQ2g7shCTff78BnnFYU5HcEpgu2B4GN6o9LWzJkzcF6zMWzzENeMgaPjVfo';
+function _b64uToBytes(s) {
+  const pad = '='.repeat((4 - s.length % 4) % 4);
+  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+async function ensurePushSub() {
+  try {
+    if (App._pushSub) return App._pushSub;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return null;
+    if (Notification.permission !== 'granted' || !navigator.serviceWorker.controller) return null;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _b64uToBytes(PUSH_PUBKEY) });
+    App._pushSub = sub.toJSON();
+    return App._pushSub;
+  } catch (e) { return null; } // not installed / unsupported / declined — the local fallback still applies
+}
+function schedulePing(endTs) {
+  ensurePushSub().then(s => {
+    if (!s || !s.endpoint) return;
+    return syncRpc('lo_schedule_ping', {
+      p_endpoint: s.endpoint, p_sub: s,
+      p_due: new Date(endTs + 1000).toISOString(),
+      p_payload: { title: '⏱ Rest done!', body: 'Back to it — your next set is ready 💥' },
+    });
+  }).catch(() => { /* offline — wall-clock timer in the app still runs */ });
+}
+function cancelPing() {
+  const s = App._pushSub;
+  if (!s || !s.endpoint) return;
+  Promise.resolve(syncRpc('lo_cancel_ping', { p_endpoint: s.endpoint })).catch(() => {});
+}
+
 /* ---------- pair codes: LIFT-XXXXX-XXXXX-XXXXX-XXXXX ---------- */
 const PAIR_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // no 0/1/I/L/O — nothing to misread
 function makePairKey() {
@@ -4280,7 +4322,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.8.1';
+const APP_VERSION = '3.9.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5267,6 +5309,12 @@ function renderRest() {
 function _restTick() {
   const r = App.restTimer; if (!r) return;
   const remaining = (r.endTs - Date.now()) / 1000;
+  // she's watching the timer and it's nearly done — the in-app cue will cover it,
+  // so call off the server push before it fires (avoids a redundant banner)
+  if (remaining <= 12 && !r.pingCancelled && document.visibilityState === 'visible') {
+    r.pingCancelled = true;
+    if (typeof cancelPing === 'function') cancelPing();
+  }
   const el = document.getElementById('rest');
   if (el) {
     el.querySelector('.num').textContent = U.fmtDur(Math.max(0, Math.ceil(remaining)));
@@ -5288,6 +5336,7 @@ function _restStartAt(endTs, total) {
     const p = activeProfile(); if (p) { p.activeWorkout = App.workout; saveApp(); }
   }
   document.body.insertAdjacentHTML('beforeend', renderRest());
+  if (typeof schedulePing === 'function') schedulePing(endTs); // server push covers a locked phone
   _restTick();
 }
 function startRest(sec) {
@@ -5304,7 +5353,11 @@ function resumeRest() { // called on boot when a workout was mid-rest
   }
 }
 function stopRest() {
-  if (App.restTimer) { clearInterval(App.restTimer.iv); App.restTimer = null; }
+  if (App.restTimer) {
+    clearInterval(App.restTimer.iv);
+    if (!App.restTimer.pingCancelled && typeof cancelPing === 'function') cancelPing();
+    App.restTimer = null;
+  }
   if (App.workout) { delete App.workout.restEndTs; delete App.workout.restTotal; }
   const el = document.getElementById('rest'); if (el) el.remove();
 }
@@ -5324,7 +5377,13 @@ function askNotifPermissionOnce() {
     if (App.data.notifAsked) return;
     App.data.notifAsked = true; saveApp();
     Notification.requestPermission().then(p => {
-      if (p === 'granted') toast('🔔 You’ll get a ping when rest ends — even off the app');
+      if (p === 'granted') {
+        toast('🔔 You’ll get a ping when rest ends — even off the app');
+        if (typeof ensurePushSub === 'function') ensurePushSub().then(() => {
+          // a rest may already be running — book its push now that we can
+          if (App.restTimer && !App.restTimer.pingCancelled) schedulePing(App.restTimer.endTs);
+        });
+      }
     }).catch(() => {});
   } catch (e) { /* fine */ }
 }
@@ -5493,6 +5552,8 @@ function workoutAction(a, el, prof) {
     const r = App.restTimer;
     if (r) {
       r.endTs += 30000; r.total += 30;
+      r.pingCancelled = false;
+      if (typeof schedulePing === 'function') schedulePing(r.endTs); // re-book the push for the new end
       if (App.workout) { App.workout.restEndTs = r.endTs; App.workout.restTotal = r.total; saveApp(); }
       _restTick();
     }
@@ -7629,6 +7690,9 @@ function refreshIfNewDay() {
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshIfNewDay(); });
 setInterval(refreshIfNewDay, 15 * 60 * 1000);
+// rest-timer push: if notifications are already allowed, make sure this device
+// has a push subscription (covers users who granted before v3.9)
+if (typeof ensurePushSub === 'function') setTimeout(() => ensurePushSub(), 2500);
 // coach sync: check on boot, on regaining focus/network, and gently in the background
 if (typeof syncTick === 'function') {
   setTimeout(() => syncTick(true), 900);

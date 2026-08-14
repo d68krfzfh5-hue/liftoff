@@ -224,6 +224,24 @@ h1, h2, h3 { line-height: 1.15; }
 .setedit button { font-size: 12.5px; font-weight: 800; color: var(--ink2); background: rgba(20,22,34,0.05); border-radius: 10px; padding: 6px 13px; }
 .setedit button:active { transform: scale(0.96); }
 .setedit button[disabled] { opacity: 0.32; }
+/* v3.11: beat-last-time chips */
+.beatvs { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.beatvs .bl { font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink3); margin-right: 2px; }
+.bchip { font-size: 12px; font-weight: 800; padding: 3px 8px; border-radius: 8px; background: rgba(20,22,34,0.05); color: var(--ink2); font-variant-numeric: tabular-nums; }
+.bchip.good { background: #E7F6E7; color: #1B7F3B; }
+.bchip.low { background: #FBE9E7; color: #C0302C; }
+/* v3.11: readiness */
+.ready-pill { width: 100%; text-align: left; background: rgba(255,255,255,0.16); color: #fff; border-radius: 12px; padding: 9px 13px; font-weight: 700; font-size: 13px; }
+.ready-pill.done { background: rgba(255,255,255,0.12); }
+.ready-pill:active { transform: scale(0.99); }
+.rd-group { margin-top: 12px; }
+.rd-lb { font-size: 12.5px; font-weight: 800; color: var(--ink2); margin-bottom: 6px; }
+.rd-opts { display: flex; gap: 8px; }
+.rd-chip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 4px; border-radius: 13px; background: rgba(20,22,34,0.045); font-weight: 700; font-size: 12.5px; color: var(--ink2); border: 2px solid transparent; }
+.rd-chip .e { font-size: 21px; }
+.rd-chip.on { border-color: var(--brand); background: #FFF7F2; color: var(--ink); }
+.rd-out { margin-top: 14px; text-align: center; font-size: 13.5px; color: var(--ink2); }
+.rd-out b { color: var(--ink); }
 /* v3.10: minimised-workout resume bar (browse the app mid-workout) */
 .wo-mini { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(70px + env(safe-area-inset-bottom));
   width: min(430px, calc(100% - 20px)); display: flex; align-items: center; gap: 11px; text-align: left;
@@ -3644,6 +3662,53 @@ function lastPerformance(prof, exId) {
   return null;
 }
 
+/* most-recent logged sets for an exercise — powers the "beat last time" strip */
+function lastSetsFor(prof, exId) {
+  const logs = prof.logs || [];
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const e = logs[i].entries.find(x => x.exId === exId);
+    if (e && e.sets && e.sets.length) return e.sets.map(s => ({ w: s.w || 0, reps: s.reps || 0 }));
+  }
+  return null;
+}
+
+/* ---------- readiness check-in → gentle same-day load nudge ---------- */
+function readinessToday(prof) { return (prof.readiness || {})[U.todayISO()] || null; }
+function readinessCompute(e, s, m) {                 // each of e/s/m is -1 | 0 | 1
+  const score = (+e || 0) + (+s || 0) + (+m || 0);
+  const mod = score <= -2 ? 0.90 : score === -1 ? 0.95 : score >= 2 ? 1.03 : 1.0;
+  const label = mod < 1 ? `eased ~${Math.round((1 - mod) * 100)}%`
+    : mod > 1 ? 'nudged up a touch' : 'right on plan';
+  return { e: +e || 0, s: +s || 0, m: +m || 0, score, mod, label };
+}
+function setReadinessToday(prof, r) {
+  prof.readiness = prof.readiness || {};
+  prof.readiness[U.todayISO()] = { e: r.e, s: r.s, m: r.m, score: r.score, mod: r.mod, label: r.label, ts: Date.now() };
+  // keep it tidy: drop anything older than ~2 weeks
+  const cut = daysAgoISO(15);
+  for (const k of Object.keys(prof.readiness)) if (k < cut) delete prof.readiness[k];
+}
+function showReadinessSheet(prof) {
+  const saved = readinessToday(prof);
+  if (!App._ready) App._ready = saved ? { e: saved.e, s: saved.s, m: saved.m } : { e: 0, s: 0, m: 0 };
+  const r = App._ready;
+  const groups = [
+    ['e', 'Energy', [[-1, '😴', 'Low'], [0, '🙂', 'OK'], [1, '⚡', 'High']]],
+    ['s', 'Sleep', [[-1, '😪', 'Poor'], [0, '😐', 'OK'], [1, '😌', 'Great']]],
+    ['m', 'Muscles', [[-1, '🥵', 'Sore'], [0, '😅', 'A bit'], [1, '💪', 'Fresh']]],
+  ];
+  const preview = readinessCompute(r.e, r.s, r.m);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">How are you feeling?</h3>
+    <p class="muted mt8" style="margin-bottom:8px">A five-second check — we’ll nudge today’s weights to match, and you can still tweak any set in the workout.</p>
+    ${groups.map(([k, label, opts]) => `<div class="rd-group">
+      <div class="rd-lb">${label}</div>
+      <div class="rd-opts">${opts.map(([v, emo, t]) => `<button class="rd-chip ${r[k] === v ? 'on' : ''}" data-a="ready-set" data-k="${k}" data-v="${v}"><span class="e">${emo}</span>${t}</button>`).join('')}</div>
+    </div>`).join('')}
+    <div class="rd-out">Today’s plan: <b>${preview.mod === 1 ? 'right on plan' : 'weights ' + preview.label}</b></div>
+    <button class="btn primary block mt12" data-a="ready-save">Save & apply</button>
+    <button class="btn ghost block mt8" data-a="sheet-close">Cancel</button>`);
+}
+
 /* ---------- plate maths (per side) ---------- */
 function plateBreakdown(totalKg, barKg) {
   const perSide = (totalKg - barKg) / 2;
@@ -4339,7 +4404,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.10.0';
+const APP_VERSION = '3.11.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4529,9 +4594,14 @@ function nextPlanDay(prof) {
 /* ---- workout lifecycle ---- */
 function buildEntries(prof, exercises) {
   const easy = deloadActive(prof);
+  const rm = readinessToday(prof);
   return exercises.map(pe => {
     let t = nextTargets(prof, pe);
     if (easy) t = applyDeload(prof, pe, Object.assign({ sets: pe.sets }, t));
+    const ex0 = EX_BY_ID[pe.exId];
+    if (rm && rm.mod !== 1 && t.w && ex0 && !ex0.bw && !ex0.timed) {  // readiness eases/bumps today's loads
+      t = Object.assign({}, t, { w: Math.max(0, U.round(t.w * rm.mod, roundStepFor(ex0))) });
+    }
     const nSets = easy && t.sets ? t.sets : pe.sets;
     const sets = [];
     for (let i = 0; i < nSets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
@@ -4549,6 +4619,8 @@ function startWorkout(prof, dayIdx, trimMin) {
     coachNote: day.note || '',
     entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
   };
+  const _rmD = readinessToday(prof);
+  if (_rmD && _rmD.mod !== 1) App.workout.readyNote = `Readiness check-in: today’s weights ${_rmD.label} 💛 — tweak any set freely.`;
   prof.activeWorkout = App.workout;
   saveApp();
 }
@@ -4565,6 +4637,8 @@ function startCustomWorkout(prof, cwId, trimMin) {
     dayName: cw.name, coachNote: cw.note || '',
     entries, curIdx: 0, easy: deloadActive(prof), trimmed: trimmed ? trimmed.est : null,
   };
+  const _rmC = readinessToday(prof);
+  if (_rmC && _rmC.mod !== 1) App.workout.readyNote = `Readiness check-in: today’s weights ${_rmC.label} 💛 — tweak any set freely.`;
   prof.activeWorkout = App.workout;
   saveApp();
 }
@@ -4576,7 +4650,7 @@ function discardWorkout(prof) {
 function finishWorkout(prof) {
   const w = App.workout;
   const log = {
-    id: w.id, date: w.date, dayName: w.dayName,
+    id: w.id, date: w.date, dayName: w.dayName, dayIdx: (w.dayIdx != null ? w.dayIdx : null),
     durationMin: Math.max(1, Math.round((Date.now() - w.startTs - (w.pauseMs || 0)) / 60000)),
     entries: w.entries.map(e => ({ exId: e.exId, plan: e.plan, feel: e.feel, sets: e.sets.filter(s => s.done) }))
       .filter(e => e.sets.length),
@@ -5129,6 +5203,12 @@ function renderToday(prof) {
       <h2 style="font-size:24px;font-weight:900;margin:5px 0 2px;position:relative;z-index:1">${U.esc(day.name)}</h2>
       <div style="font-size:13px;opacity:.92;position:relative;z-index:1">${day.exercises.length} exercises · ~${estMinutes(day)} min · ${w4d.type === 'custom' ? 'Custom workout' : GOALS[prof.plan.goal].label}</div>
       <div class="mt12" style="position:relative;z-index:1">${dayList}</div>
+      <div class="mt12" style="position:relative;z-index:1">${(() => {
+        const rd = readinessToday(prof);
+        return rd
+          ? `<button class="ready-pill done" data-a="ready-open">💛 Readiness: ${rd.mod === 1 ? 'on plan' : U.esc(rd.label)} · tap to redo</button>`
+          : `<button class="ready-pill" data-a="ready-open">💛 How are you feeling? Tune today’s weights ▸</button>`;
+      })()}</div>
       <div class="row mt16" style="position:relative;z-index:1">
         ${w4d.type === 'custom'
           ? `<button class="btn onhero" style="flex:1" data-a="start-custom" data-id="${w4d.id}">Start workout</button>`
@@ -5203,7 +5283,7 @@ function renderToday(prof) {
       <div class="row"><h3>This week</h3><span class="spacer"></span><span class="muted">${wk.done}/${wk.target} lifts</span></div>
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
       ${dayMoveSummaryHtml(prof)}
-      ${lastLog ? `<div class="muted mt8">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</div>` : ''}
+      ${lastLog ? `<div class="row mt8" style="align-items:center"><span class="muted">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</span><span class="spacer"></span><button class="btn ghost sm" data-a="go-history">Past workouts ›</button></div>` : ''}
     </div>
     ${(() => {
       const fr = muscleFreshness(prof);
@@ -5273,6 +5353,7 @@ function renderWorkout(prof) {
       <div class="ob-progress" style="margin:9px 0 0"><i style="width:${totalSets ? doneSets / totalSets * 100 : 0}%"></i></div>
     </div>
     ${w.coachNote ? `<div class="coach-note">📝 <b>${U.esc(prof.coachName || 'Coach')}:</b> ${U.esc(w.coachNote)}</div>` : ''}
+    ${w.readyNote ? `<div class="coach-note" style="border-color:#E7DEFF;background:#FBF9FF">💛 ${U.esc(w.readyNote)}</div>` : ''}
     ${warmupCardHtml(w)}
     ${w.entries.map((e, ei) => renderWorkoutEx(prof, e, ei)).join('')}
     <button class="btn ghost block" data-a="wo-add-ex">+ Add an exercise</button>
@@ -5331,6 +5412,18 @@ function renderWorkoutEx(prof, e, ei) {
         <button class="donebtn ${s.done ? 'on' : ''}" data-a="wo-done" data-ei="${ei}" data-si="${si}">✓</button>
       </div>`).join('')}
     </div>
+    ${(() => {
+      const lastSets = lastSetsFor(prof, ex.id);
+      if (!lastSets) return '';
+      const chips = e.sets.map((s, si) => {
+        const L = lastSets[si]; if (!L) return '';
+        const cmp = (ex.bw || ex.timed) ? s.reps >= L.reps : e1rm(s.w || 0, s.reps) >= e1rm(L.w, L.reps);
+        const beat = s.done && cmp && s.reps > 0, low = s.done && !cmp;
+        const txt = ex.timed ? `${L.reps}s` : (L.w > 0 ? `${U.fmtW(L.w, u)}×${L.reps}` : `${L.reps}`);
+        return `<span class="bchip ${beat ? 'good' : low ? 'low' : ''}">${beat ? '✓ ' : ''}${txt}</span>`;
+      }).join('');
+      return chips ? `<div class="beatvs"><span class="bl">Beat last</span>${chips}</div>` : '';
+    })()}
     <div class="setedit">
       <button data-a="wo-delset" data-ei="${ei}" ${e.sets.length <= 1 ? 'disabled' : ''}>− set</button>
       <button data-a="wo-addset" data-ei="${ei}">+ set</button>
@@ -5728,6 +5821,10 @@ function showExerciseSheet(exId, prof) {
       </div>
     </div>
     ${stats}
+    ${(st && st.history && st.history.length >= 2) ? `<div class="card mt12" style="padding:12px 14px">
+      <div class="row" style="margin-bottom:4px"><h4 style="margin:0">Strength trend</h4><span class="spacer"></span><span class="muted" style="font-size:11.5px">est. 1RM</span></div>
+      ${Charts.line([{ label: 'Est. 1RM', pts: st.history.slice(-16).map(h => ({ x: U.fmtDateShort(h.date), y: prof.units === 'lb' ? Math.round(h.e1rm * 2.20462 * 10) / 10 : h.e1rm })) }], { h: 132 })}
+    </div>` : ''}
     <div class="guide">
       <h4>Set up</h4><ul>${ex.how.setup.map(s => `<li>${U.esc(s)}</li>`).join('')}</ul>
       <h4>How to do it</h4><ul>${ex.how.steps.map(s => `<li>${U.esc(s)}</li>`).join('')}</ul>
@@ -5908,6 +6005,9 @@ function renderPlanView(prof) {
   const wdFor = i => { for (const [wd, idx] of Object.entries(plan.dayMap || {})) if (+idx === i && !(prof.customMap && prof.customMap[wd])) return +wd; return null; };
   const at = ATHLETE_TYPES[prof.quiz.athleteType || 'gym'];
   const td = todayWeekday();
+  // which plan days were completed this week (for the ✓ checked-off badges)
+  const _wkStart = U.weekKey(U.todayISO());
+  const doneIdxWk = new Set((prof.logs || []).filter(l => l.date >= _wkStart && l.dayIdx != null).map(l => l.dayIdx));
   const weekCard = sched ? `<div class="card">
       <div class="row"><h3>${prof.isCoach && prof.coachOf ? U.esc(prof.coachOf.athleteName) + '’s week' : 'Your week'}</h3><span class="spacer"></span><span class="tag">${at.emoji} ${at.label}</span></div>
       <div class="plan-week mt12">
@@ -5937,11 +6037,11 @@ function renderPlanView(prof) {
       <div class="card day-card">
         <div class="day-head">
           <div class="day-num">${i + 1}</div>
-          <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}</h3>
+          <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${doneIdxWk.has(i) ? ' <span class="tag" style="vertical-align:2px;background:#E7F6E7;color:#1B7F3B">✓ done</span>' : ''}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}</h3>
           <div class="focus">${d.focus.map(f => GROUP_LABELS[f] || f).join(' · ')} · ~${estMinutes(d)} min</div></div>
           ${prof.isCoach ? `<button class="iconbtn" data-a="tpl-save-day" data-idx="${i}" title="Save this day to my templates">🔖</button>` : ''}
           <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day">✏️</button>
-          ${prof.isCoach ? '' : `<button class="btn sm dark" data-a="start-workout" data-idx="${i}">Start</button>`}
+          ${prof.isCoach ? '' : `<button class="btn sm ${doneIdxWk.has(i) ? 'ghost' : 'dark'}" data-a="start-workout" data-idx="${i}">${doneIdxWk.has(i) ? 'Again' : 'Start'}</button>`}
         </div>
         ${d.note ? `<div class="coach-note" style="margin-top:8px">📝 ${U.esc(d.note)}</div>` : ''}
         <div class="mt8">
@@ -6267,6 +6367,21 @@ function dispatch(e) {
   if (a === 'vid-pick') { App._vidChoice = { exId: el.dataset.ex, i: +el.dataset.i }; showExerciseSheet(el.dataset.ex, prof); return; }
   if (a === 'choose-day') { showChooseDaySheet(prof); return; }
   if (a === 'day-peek') { showDayPeekSheet(prof, +el.dataset.d); return; }
+  if (a === 'ready-open') { App._ready = null; showReadinessSheet(prof); return; }
+  if (a === 'ready-set') { App._ready = App._ready || { e: 0, s: 0, m: 0 }; App._ready[el.dataset.k] = +el.dataset.v; showReadinessSheet(prof); return; }
+  if (a === 'ready-save') {
+    const t = App._ready || { e: 0, s: 0, m: 0 };
+    const r = readinessCompute(t.e, t.s, t.m);
+    setReadinessToday(prof, r); App._ready = null;
+    closeSheet(); saveApp(); render();
+    toast(r.mod === 1 ? 'Logged — today’s right on plan 💛' : `Logged — today’s weights ${r.label} 💛`);
+    return;
+  }
+  if (a === 'go-history') {
+    App.view = 'progress'; App._scrollTop = true; render();
+    setTimeout(() => { const el2 = document.getElementById('hist-card'); if (el2) el2.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 80);
+    return;
+  }
   if (a === 'start-workout') { closeSheet(); guardPausedThen(prof, () => { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); }); return; }
   // custom workout actions
   if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
@@ -6948,7 +7063,7 @@ function historyCardHtml(prof) {
       <span class="w" style="font-size:12px">${sets} ${U.plural(sets, 'set')} · ${U.compact(vol)}kg</span>
     </button>`;
   }).join('');
-  return `<div class="card"><div class="row"><h3>History</h3><span class="spacer"></span><span class="muted">${logs.length} ${U.plural(logs.length, 'session')}</span></div>
+  return `<div class="card" id="hist-card"><div class="row"><h3>History</h3><span class="spacer"></span><span class="muted">${logs.length} ${U.plural(logs.length, 'session')}</span></div>
     <p class="muted mt8" style="font-size:12px">Tap a session to see every set — typos can be fixed there.</p>
     <div class="mt8">${rows}</div>
     ${logs.length > 6 ? `<button class="btn ghost sm block mt8" data-a="hist-more">${showAll ? 'Show fewer' : `Show all ${logs.length}`}</button>` : ''}

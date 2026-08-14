@@ -219,6 +219,23 @@ h1, h2, h3 { line-height: 1.15; }
 .rest .bar { position: absolute; left: 14px; right: 14px; bottom: 7px; height: 3.5px; border-radius: 2px; background: rgba(255,255,255,0.18); }
 .rest .bar i { display: block; height: 100%; border-radius: 2px; background: var(--grad); }
 .rest button { background: rgba(255,255,255,0.14); border-radius: 10px; padding: 8px 12px; font-weight: 800; font-size: 13px; }
+/* v3.10: in-workout set add/remove */
+.setedit { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; }
+.setedit button { font-size: 12.5px; font-weight: 800; color: var(--ink2); background: rgba(20,22,34,0.05); border-radius: 10px; padding: 6px 13px; }
+.setedit button:active { transform: scale(0.96); }
+.setedit button[disabled] { opacity: 0.32; }
+/* v3.10: minimised-workout resume bar (browse the app mid-workout) */
+.wo-mini { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(70px + env(safe-area-inset-bottom));
+  width: min(430px, calc(100% - 20px)); display: flex; align-items: center; gap: 11px; text-align: left;
+  background: var(--ink); color: #fff; border-radius: 15px; padding: 10px 13px; box-shadow: var(--shadow-big); z-index: 45; }
+.wo-mini:active { transform: translateX(-50%) scale(0.99); }
+.wo-mini-ic { font-size: 20px; }
+.wo-mini-mid { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.wo-mini-mid b { font-size: 14px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wo-mini-mid small { font-size: 11.5px; opacity: 0.82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.wo-mini-go { flex: none; font-size: 13px; font-weight: 800; background: rgba(255,255,255,0.16); padding: 7px 11px; border-radius: 10px; white-space: nowrap; }
+body.wo-min .rest { bottom: calc(126px + env(safe-area-inset-bottom)); }
+body.wo-min .screen { padding-bottom: 58px; }
 
 /* ---------- library ---------- */
 .search {
@@ -4322,7 +4339,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '3.10.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4665,6 +4682,9 @@ function render() {
   if (_elapsedIv) { clearInterval(_elapsedIv); _elapsedIv = null; }
   const app = $app();
   const prof = activeProfile();
+  if (!App.workout) App.woMin = false;               // heal the minimise flag if the workout ended
+  const woActive = !!App.workout, woFull = woActive && !App.woMin;
+  document.body.classList.toggle('wo-min', woActive && !!App.woMin);
   // Scroll behaviour: amendments (logging a set, editing in place, a background
   // day/sync refresh) must NOT yank the page back to the top. Only deliberate
   // navigation — switching tab, opening a different profile, entering/leaving a
@@ -4672,7 +4692,7 @@ function render() {
   // by a change in the "view key"; anything else keeps the current scroll.
   const viewKey = (!prof || App.creating)
     ? 'ob:' + (App.onboarding ? App.onboarding.step : 0)
-    : App.workout ? 'workout'
+    : woFull ? 'workout'
     : (App.data.activeProfileId || '') + ':' + App.view;
   const navigated = App._scrollTop || viewKey !== App._lastViewKey;
   App._scrollTop = false;
@@ -4680,16 +4700,42 @@ function render() {
   const y = navigated ? 0 : (window.scrollY || 0);
 
   if (!prof || App.creating) { app.innerHTML = renderOnboarding(); bindOnboarding(); _restoreScroll(y); return; }
-  if (App.workout) { app.innerHTML = renderWorkout(prof); afterWorkoutRender(prof); _restoreScroll(y); return; }
+  if (woFull) { app.innerHTML = renderWorkout(prof); afterWorkoutRender(prof); _restoreScroll(y); return; }
   let html = '';
   if (App.view === 'today') html = prof.isCoach ? renderCoachHome(prof) : renderToday(prof);
   else if (App.view === 'plan') html = renderPlanView(prof);
   else if (App.view === 'library') html = renderLibrary(prof);
   else if (App.view === 'progress') html = prof.isCoach ? renderCoachProgress(prof) : renderProgress(prof);
   else html = renderProfileView(prof);
-  app.innerHTML = html + renderTabs(prof);
+  app.innerHTML = html + (woActive ? workoutResumeBarHtml(prof) : '') + renderTabs(prof);
   afterRender(prof);
+  if (woActive) _miniElapsedTick(prof);              // keep the mini-bar clock live while browsing
   _restoreScroll(y);
+}
+
+// floating "back to your workout" bar shown over any tab while a workout is minimised
+function workoutResumeBarHtml(prof) {
+  const w = App.workout; if (!w) return '';
+  const done = w.entries.reduce((t, e) => t + e.sets.filter(s => s.done).length, 0);
+  const total = w.entries.reduce((t, e) => t + e.sets.length, 0);
+  let idx = w.entries.findIndex(e => e.sets.some(s => !s.done));
+  if (idx < 0) idx = Math.max(0, w.entries.length - 1);
+  const ex = EX_BY_ID[w.entries[idx].exId] || { name: 'Workout' };
+  return `<button class="wo-mini" data-a="wo-restore">
+    <span class="wo-mini-ic">🏋️</span>
+    <span class="wo-mini-mid"><b>${U.esc(w.dayName)}</b><small>${U.esc(ex.name)} · ${done}/${total} sets · <span id="wo-mini-elapsed">0:00</span></small></span>
+    <span class="wo-mini-go">Resume ▸</span>
+  </button>`;
+}
+function _miniElapsedTick(prof) {
+  const w = App.workout; if (!w) return;
+  const tick = () => {
+    const el = document.getElementById('wo-mini-elapsed'); if (!el) return;
+    const s = Math.max(0, Math.floor((Date.now() - w.startTs - (w.pauseMs || 0)) / 1000));
+    el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  };
+  tick();
+  _elapsedIv = setInterval(tick, 1000);
 }
 
 // re-apply a scroll position after an innerHTML swap; the rAF pass catches
@@ -5218,8 +5264,9 @@ function renderWorkout(prof) {
   return `<div class="screen">
     <div class="wo-head">
       <div class="wo-topbar">
-        <button class="iconbtn" data-a="wo-exit">✕</button>
+        <button class="iconbtn" data-a="wo-exit" title="Pause or discard">✕</button>
         <div style="text-align:center;flex:1;min-width:0"><div class="t">${U.esc(w.dayName)}</div>${flags ? `<div class="elapsed">${flags}</div>` : ''}</div>
+        <button class="iconbtn" data-a="wo-min" title="Minimise — browse the app while this keeps running">⌄</button>
         <button class="btn sm dark" data-a="wo-finish">Finish</button>
       </div>
       ${workoutHudHtml(prof, w)}
@@ -5283,6 +5330,10 @@ function renderWorkoutEx(prof, e, ei) {
         </div>
         <button class="donebtn ${s.done ? 'on' : ''}" data-a="wo-done" data-ei="${ei}" data-si="${si}">✓</button>
       </div>`).join('')}
+    </div>
+    <div class="setedit">
+      <button data-a="wo-delset" data-ei="${ei}" ${e.sets.length <= 1 ? 'disabled' : ''}>− set</button>
+      <button data-a="wo-addset" data-ei="${ei}">+ set</button>
     </div>
     ${anyDone && !ex.timed ? `<div class="feel">
       ${[['easy', '😎 Easy'], ['right', '💪 Just right'], ['hard', '🥵 Hard']].map(([v, l]) =>
@@ -5419,7 +5470,8 @@ function workoutAction(a, el, prof) {
     const total = w.entries.reduce((t, e) => t + e.sets.length, 0);
     showSheet(`<h3 style="font-size:19px;font-weight:900">Take a break?</h3>
       <p class="muted mt8" style="margin-bottom:12px">You've ticked ${done} of ${total} sets. Whatever you pick, nothing is lost by accident.</p>
-      <button class="btn primary block" data-a="wo-pause">⏸ Pause — finish later</button>
+      <button class="btn primary block" data-a="wo-min">⌄ Minimise — browse the app, keep it running</button>
+      <button class="btn ghost block mt8" data-a="wo-pause">⏸ Pause — finish later from Today</button>
       <button class="btn ghost block mt8" data-a="sheet-close">Keep training</button>
       <button class="btn block mt8" style="background:#FBE9E7;color:#C0302C" data-a="wo-discard-ask">Discard this workout</button>`);
     return;
@@ -5542,6 +5594,21 @@ function workoutAction(a, el, prof) {
       }
     }, 1000) };
     if (span) span.textContent = `⏳ ${left}s…`;
+    return;
+  }
+  if (a === 'wo-min') { App.woMin = true; closeSheet(); render(); toast('Workout minimised — tap the bar to jump back ▸'); return; }
+  if (a === 'wo-restore') { App.woMin = false; render(); return; }
+  if (a === 'wo-addset') {
+    const e = w.entries[+el.dataset.ei];
+    const ex = EX_BY_ID[e.exId];
+    const last = e.sets[e.sets.length - 1] || {};
+    e.sets.push({ w: ex.timed ? 0 : (last.w || 0), reps: last.reps || (e.plan && e.plan.repsMax) || (ex.timed ? 30 : 10), done: false });
+    prof.activeWorkout = w; saveApp(); render();
+    return;
+  }
+  if (a === 'wo-delset') {
+    const e = w.entries[+el.dataset.ei];
+    if (e.sets.length > 1) { e.sets.pop(); prof.activeWorkout = w; saveApp(); render(); }
     return;
   }
   if (a === 'wo-feel') { w.entries[+el.dataset.ei].feel = el.dataset.v; prof.activeWorkout = w; saveApp(); render(); return; }
@@ -6204,7 +6271,7 @@ function dispatch(e) {
   // custom workout actions
   if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
-  if (['wo-exit', 'wo-pause', 'wo-discard-ask', 'wo-resume', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'wo-goto-active', 'rest-add', 'rest-skip'].includes(a))
+  if (['wo-exit', 'wo-pause', 'wo-discard-ask', 'wo-resume', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'wo-goto-active', 'wo-min', 'wo-restore', 'wo-addset', 'wo-delset', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
   if (a === 'do-swap') {
     const ei = +el.dataset.ei;

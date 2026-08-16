@@ -956,6 +956,23 @@ button.pw-day { font-family: inherit; }
 .ea-superman{--m:url(superman.webp)}
 .ea-upright_row_db{--m:url(upright_row_db.webp)}
 .ea-walking_lunge_db{--m:url(walking_lunge_db.webp)}
+/* v3.14 — merged Plan tab: next-workout card, hero art thumbs, full-plan drill-in */
+.pe-art{width:30px;height:30px;border-radius:9px;background:var(--tint);flex:none;position:relative;overflow:hidden}
+.pe-art .exart{position:absolute;inset:3px}
+.nextwo{display:block;width:100%;text-align:left}
+.nextwo .nextwo-name{font-family:var(--font-display);font-size:18px;font-weight:800;letter-spacing:-.01em;color:var(--ink);margin-top:12px;line-height:1.1}
+.nextwo .nextwo-meta{color:var(--ink2);font-size:12.5px;font-weight:700;margin-top:3px}
+.nextwo-arts{display:flex;gap:8px;margin-top:13px}
+.nextwo-art{width:48px;height:48px;border-radius:13px;background:var(--tint);flex:none;position:relative;overflow:hidden}
+.nextwo-art .exart{position:absolute;inset:6px}
+.nextwo-names{color:var(--ink3);font-size:12px;margin-top:10px;line-height:1.5}
+.nextwo-go{color:var(--brand);font-size:12.5px;font-weight:800;margin-top:11px}
+.planlink{display:flex;width:100%;text-align:left;align-items:center;gap:12px}
+.planlink-tx{flex:1;min-width:0;display:block}
+.planlink-h{display:block;font-family:var(--font-display);font-size:16px;font-weight:800;letter-spacing:-.01em;color:var(--ink)}
+.planlink-s{display:block;color:var(--ink3);font-size:12.5px;margin-top:2px}
+.planlink-go{color:var(--ink3);font-size:26px;line-height:1;font-weight:700;flex:none}
+.planback{margin-bottom:12px}
 </style>
 
 </head>
@@ -4638,7 +4655,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.13.0';
+const APP_VERSION = '3.14.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5074,10 +5091,14 @@ function renderTabs(prof) {
   const coach = prof && prof.isCoach;
   const tabs = coach
     ? [['today', 'Coach'], ['plan', 'Their plan'], ['library', 'Exercises'], ['progress', 'Their progress'], ['profile', 'Profile']]
-    : [['today', 'Today'], ['plan', 'Plan'], ['library', 'Exercises'], ['progress', 'Progress'], ['profile', 'Profile']];
+    : [['today', 'Plan'], ['library', 'Exercises'], ['progress', 'Progress'], ['profile', 'Profile']];
+  // athlete's "Plan" tab (view id 'today') also owns the drilled-in full-plan page,
+  // so keep it lit while App.view === 'plan', and give it the calendar glyph.
+  const isOn = id => App.view === id || (!coach && id === 'today' && App.view === 'plan');
+  const iconFor = id => (!coach && id === 'today') ? ICONS.plan : ICONS[id];
   return `<nav class="tabs">
     <svg width="0" height="0"><defs><linearGradient id="tabgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF4D3D"/><stop offset="1" stop-color="#FF9F1C"/></linearGradient></defs></svg>
-    ${tabs.map(([id, lbl]) => `<button class="${App.view === id ? 'on' : ''}" data-a="tab" data-id="${id}">${ICONS[id]}${lbl}</button>`).join('')}
+    ${tabs.map(([id, lbl]) => `<button class="${isOn(id) ? 'on' : ''}" data-a="tab" data-id="${id}">${iconFor(id)}${lbl}</button>`).join('')}
   </nav>`;
 }
 
@@ -5409,6 +5430,43 @@ function dayMoveSummaryHtml(prof) {
   return `<div class="muted mt8" style="font-size:12px;line-height:1.55">This week: ${bits.join(' · ')}</div>`;
 }
 
+/* the next gym session from today INCLUSIVE (startI=1 skips today, used once
+   today's own session is done/paused). Returns null if none in the coming week.
+   Shape mirrors effWorkoutForWeekday + the weekday and day-offset. */
+function upcomingGym(prof, startI) {
+  const sched = prof.quiz.weekSchedule;
+  if (!sched || !prof.plan) return null;
+  const t = todayWeekday();
+  for (let i = startI || 0; i < 7; i++) {
+    const dayIdx = t + i, wd = dayIdx % 7, inWeek = dayIdx < 7;
+    const act = inWeek ? effActivityOn(prof, wd) : (sched[wd] || 'rest');
+    if (act !== 'lift') continue;
+    const w4d = inWeek ? effWorkoutForWeekday(prof, wd) : workoutForWeekday(prof, wd);
+    if (!w4d) continue;
+    return { wd, inDays: i, name: w4d.name, type: w4d.type, id: w4d.id, idx: w4d.idx, exercises: w4d.exercises };
+  }
+  return null;
+}
+// one illustration tile for the next-workout strip (plain tinted tile if no art yet)
+function nextArtTile(id) {
+  return '<span class="nextwo-art">' + (EXART_HAS.has(id) ? '<div class="exart ea-' + id + '"></div>' : '') + '</span>';
+}
+function nextWorkoutCardHtml(prof, info) {
+  if (!info) return '';
+  const when = info.inDays === 0 ? 'Today' : info.inDays === 1 ? 'Tomorrow' : WEEKDAYS_FULL[info.wd];
+  const arts = info.exercises.slice(0, 6).map(pe => nextArtTile(pe.exId)).join('');
+  const names = info.exercises.slice(0, 4).map(pe => U.esc((EX_BY_ID[pe.exId] || {}).name || '')).filter(Boolean).join(' · ');
+  const more = info.exercises.length > 4 ? ' +' + (info.exercises.length - 4) + ' more' : '';
+  return `<button class="card nextwo" data-a="day-peek" data-d="${info.wd}">
+    <div class="row"><h3>Next gym workout</h3><span class="spacer"></span><span class="tag">${when}</span></div>
+    <div class="nextwo-name">${U.esc(info.name)}${info.type === 'custom' ? ' <span class="tag" style="vertical-align:2px">your build</span>' : ''}</div>
+    <div class="nextwo-meta">${info.exercises.length} exercises · ~${estMinutes({ exercises: info.exercises })} min</div>
+    <div class="nextwo-arts">${arts}</div>
+    ${names ? `<div class="nextwo-names">${names}${more}</div>` : ''}
+    <div class="nextwo-go">Preview &amp; swap ›</div>
+  </button>`;
+}
+
 function renderToday(prof) {
   const wd = todayWeekday();
   const act = effActivityOn(prof, wd) || 'lift';
@@ -5445,7 +5503,7 @@ function renderToday(prof) {
       const ex = EX_BY_ID[pe.exId];
       const t = nextTargets(prof, pe);
       return `<div class="plan-ex">
-        <span class="dot"></span>${U.esc(ex.name)}
+        ${EXART_HAS.has(pe.exId) ? '<span class="pe-art"><div class="exart ea-' + pe.exId + '"></div></span>' : '<span class="dot"></span>'}${U.esc(ex.name)}
         <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${t.w ? ' · ' + U.fmtW(t.w, u) + U.unitLabel(u) : ''}</span>
       </div>`;
     }).join('');
@@ -5517,6 +5575,18 @@ function renderToday(prof) {
     </div>`;
   }
 
+  // "Next gym workout" = the next session from today inclusive (per Benn: even if
+  // that's today). When today's own gym session is the hero (unstarted), it already
+  // shows the workout + icons, so we don't repeat it as a card; once it's done or
+  // paused we point at the following session instead.
+  const heroIsTodayGym = act === 'lift' && nl && nl.inDays === 0 && !liftedToday && !(aw && !App.workout);
+  const nextInfo = heroIsTodayGym ? null : upcomingGym(prof, (nl && nl.inDays === 0) ? 1 : 0);
+  const nextCard = nextWorkoutCardHtml(prof, nextInfo);
+  const fullPlanCard = `<button class="card planlink" data-a="tab" data-id="plan">
+    <span class="planlink-tx"><span class="planlink-h">Your full plan</span><span class="planlink-s">All days, custom workouts &amp; saved weeks</span></span>
+    <span class="planlink-go">›</span>
+  </button>`;
+
   return `<div class="screen">
     <div class="hdr">
       <div><div class="hi">${greeting()}, ${U.esc(prof.name)} <span style="font-size:20px"></span></div>
@@ -5530,12 +5600,14 @@ function renderToday(prof) {
     ${coachPlanCardHtml(prof)}
     ${hero}
     ${coachMsgCardHtml(prof)}
+    ${nextCard}
     <div class="card">
       <div class="row"><h3>This week</h3><span class="spacer"></span><span class="muted">${wk.done}/${wk.target} lifts</span></div>
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
       ${dayMoveSummaryHtml(prof)}
       ${lastLog ? `<div class="row mt8" style="align-items:center"><span class="muted">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</span><span class="spacer"></span><button class="btn ghost sm" data-a="go-history">Past workouts ›</button></div>` : ''}
     </div>
+    ${fullPlanCard}
     ${(() => {
       const fr = muscleFreshness(prof);
       if (!Object.keys(fr).length) return '';
@@ -6283,7 +6355,8 @@ function renderPlanView(prof) {
     </div>` : '';
   const coachOf = prof.isCoach && prof.coachOf;
   return `<div class="screen">
-    <div class="hdr"><div><div class="hi">${coachOf ? U.esc(coachOf.athleteName) + '’s plan' : 'Your plan'}</div>
+    ${prof.isCoach ? '' : `<button class="btn sm ghost planback" data-a="tab" data-id="today">‹ Plan</button>`}
+    <div class="hdr"><div><div class="hi">${coachOf ? U.esc(coachOf.athleteName) + '’s plan' : 'Full plan'}</div>
       <div class="sub">${coachOf ? 'Every save syncs to their phone · ' : ''}${U.esc(plan.splitName)} · ${GOALS[plan.goal].label} ${IC(GOALS[plan.goal].emoji)}</div></div>
       <button class="btn sm ghost" data-a="prefs-open">Adjust</button>
     </div>

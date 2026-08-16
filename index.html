@@ -3193,6 +3193,45 @@ function nextTargets(profile, planEx) {
   return { w: st.w, reps, sets: planEx.sets, isNew: st.w == null && !ex.bw && !ex.timed };
 }
 
+/* A conservative STARTING-weight estimate for a weighted exercise she hasn't logged
+   yet — so the plan shows a number to aim for. Rough by design (scaled to equipment,
+   compound-vs-isolation, experience and sex); it fine-tunes the moment she logs a set.
+   Shown with a leading "~". Returns null for bodyweight / timed moves. */
+const ISO_PATTERNS = ['bi', 'tri', 'deltside', 'reardelt', 'calf', 'hamiso', 'gluteiso', 'chestiso', 'quadiso', 'coreanti', 'coreflex', 'corerot'];
+function startWeightEst(profile, ex) {
+  if (!ex || ex.bw || ex.timed) return null;
+  const q = profile.quiz || {};
+  const lvlF = q.experience === 'advanced' ? 1.4 : q.experience === 'intermediate' ? 1.0 : 0.7;
+  const sexF = q.bodySex === 'male' ? 1.0 : 0.72;
+  const eq = ex.equip || [];
+  const iso = ISO_PATTERNS.includes(ex.pattern);
+  let base;
+  if (eq.includes('barbell')) base = ['deadlift', 'hinge', 'squat', 'hthrust'].includes(ex.pattern) ? 40 : 25;
+  else if (eq.includes('machine') || eq.includes('cable')) base = iso ? 15 : 27;
+  else if (eq.includes('dumbbell') || eq.includes('kettlebell')) base = iso ? 6 : 12;   // per implement
+  else base = 8;
+  if (iso && eq.includes('barbell')) base *= 0.6;
+  const step = roundStepFor(ex);
+  return Math.max(step, Math.round(base * lvlF * sexF / step) * step);
+}
+/* the weight string shown next to a plan exercise. Coach reads the client's synced
+   top set; the athlete reads her own progression. Falls back to a ~estimate. */
+function planWeightDisplay(profile, planEx) {
+  const ex = EX_BY_ID[planEx.exId];
+  if (!ex || ex.bw || ex.timed) return '';
+  const u = profile.units;
+  let w = null;
+  if (profile.isCoach && profile.coachOf) {
+    const et = (profile.coachOf.progress && profile.coachOf.progress.exTop) || {};
+    w = (et[planEx.exId] || {}).w || null;
+  } else {
+    w = nextTargets(profile, planEx).w;
+  }
+  if (w) return ' @ ' + U.fmtW(w, u) + U.unitLabel(u);
+  const est = startWeightEst(profile, ex);
+  return est ? ' ~' + U.fmtW(est, u) + U.unitLabel(u) : '';
+}
+
 /* After a workout is finished: update per-exercise state; returns array of feedback msgs */
 function applyProgression(profile, log) {
   const q = profile.quiz;
@@ -4726,7 +4765,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.17.0';
+const APP_VERSION = '3.17.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5453,9 +5492,8 @@ function showDayPeekSheet(prof, d) {
         <div class="mt8">
         ${day.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
-          const tg = isCoach ? { w: (src.exTop[pe.exId] || {}).w } : nextTargets(prof, pe);
           return `<div class="plan-ex"><span class="dot"></span>${U.esc(ex.name)}
-            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${tg.w ? ' @ ' + U.fmtW(tg.w, u) + U.unitLabel(u) : ''}</span></div>`;
+            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${planWeightDisplay(prof, pe)}</span></div>`;
         }).join('')}
         </div>
         ${when === 'today' && !isCoach
@@ -5525,12 +5563,11 @@ function showNextWeekDaySheet(prof, d) {
         <div class="mt12">
         ${day.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
-          const tg = nextTargets(prof, pe);
           return `<div class="plan-ex">${EXART_HAS.has(pe.exId) ? '<span class="pe-art"><div class="exart ea-' + pe.exId + '"></div></span>' : '<span class="dot"></span>'}${U.esc(ex.name)}
-            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${tg.w ? ' @ ' + U.fmtW(tg.w, u) + U.unitLabel(u) : ''}</span></div>`;
+            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${planWeightDisplay(prof, pe)}</span></div>`;
         }).join('')}
         </div>
-        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>`;
+        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights come from ${prof.isCoach && prof.coachOf ? 'her' : 'your'} recent lifts; <b>~</b> is a starting estimate until ${prof.isCoach && prof.coachOf ? 'she logs' : 'you log'} that move — everything fine-tunes with training.</div>`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
     body = `<div style="font-weight:800;font-size:14.5px">${IC(ACTIVITIES[act].emoji)} ${U.esc(sportLabelFor(prof, act))}</div>
@@ -6580,10 +6617,10 @@ function renderPlanView(prof) {
         ${d.note ? `<div class="coach-note" style="margin-top:8px">${U.esc(d.note)}</div>` : ''}
         <div class="mt8">
         ${d.exercises.map(pe => {
-          const ex = EX_BY_ID[pe.exId]; const t = nextTargets(prof, pe);
+          const ex = EX_BY_ID[pe.exId];
           return `<button class="plan-ex" style="width:100%;text-align:left" data-a="ex-open" data-ex="${ex.id}">
             <span class="dot"></span>${U.esc(ex.name)}
-            <span class="sr">${pe.sets}×${pe.repsMin}–${pe.repsMax}${pe.timed ? 's' : ''}${t.w ? ' @ ' + U.fmtW(t.w, prof.units) : ''}</span>
+            <span class="sr">${pe.sets}×${pe.repsMin}–${pe.repsMax}${pe.timed ? 's' : ''}${planWeightDisplay(prof, pe)}</span>
           </button>`;
         }).join('')}
         </div>

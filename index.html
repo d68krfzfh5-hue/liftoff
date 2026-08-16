@@ -976,6 +976,12 @@ button.pw-day { font-family: inherit; }
 .nextweek-head{display:flex;align-items:baseline;gap:8px;margin:14px 0 9px;padding-top:13px;border-top:1px solid var(--line);font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--ink3)}
 .nextweek-head .nextweek-sub{letter-spacing:0;text-transform:none;font-weight:600;font-size:11px;color:var(--ink3);opacity:.75}
 .plan-week.nextweek .pw-day{padding:8px 3px 7px}
+.plan-week .pw-day{position:relative}
+.pw-day.ov{outline:1.5px solid var(--brand);outline-offset:-2px}
+.pw-day .pw-ov{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.cw-scope{margin-top:15px}
+.cw-scope-lb{font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--ink3);margin-bottom:7px}
+.cw-scope-hint{font-size:12px;margin-top:7px;line-height:1.45}
 </style>
 
 </head>
@@ -3588,7 +3594,34 @@ function nextLiftInfo(prof) {
   return null;
 }
 /* what actually runs on a lift weekday: custom override or the generated plan day */
-function workoutForWeekday(prof, wd) {
+/* ===== per-week plan overrides — "edit next week" without touching the standard plan =====
+   prof.plan.weekPlan = { [weekKeyISO]: { [planIdx]: { name, note, exercises:[pe...] } } }
+   Keyed by absolute week (Monday ISO) + plan-day index. plan.days is the default;
+   an override replaces one day's CONTENT for a single week, then is pruned once that
+   week has passed. Weights/reps targets are NOT stored — buildEntries still computes
+   them from history + readiness, so progression keeps flexing (per Benn's ask). */
+function _isoOf(dt) { return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0'); }
+function weekKeyThis() { return U.weekKey(U.todayISO()); }
+function weekKeyNext() { const d = U.parseISO(weekKeyThis()); d.setDate(d.getDate() + 7); return _isoOf(d); }
+function ensureWeekPlan(prof) { if (prof.plan && (!prof.plan.weekPlan || typeof prof.plan.weekPlan !== 'object')) prof.plan.weekPlan = {}; return (prof.plan && prof.plan.weekPlan) || {}; }
+function pruneWeekPlan(prof) { // drop weeks that have already passed (ISO strings sort chronologically)
+  if (!prof.plan || !prof.plan.weekPlan) return;
+  const cur = weekKeyThis();
+  for (const k of Object.keys(prof.plan.weekPlan)) if (k < cur) delete prof.plan.weekPlan[k];
+}
+function weekOverrideFor(prof, idx, weekKey) {
+  const wp = prof.plan && prof.plan.weekPlan;
+  const ov = wp && wp[weekKey] && wp[weekKey][idx];
+  return (ov && Array.isArray(ov.exercises) && ov.exercises.length) ? ov : null;
+}
+function planDayFor(prof, idx, weekKey) { // the effective day for a given week (override or template)
+  const base = (prof.plan && prof.plan.days) ? prof.plan.days[idx] : null;
+  if (!base) return base;
+  const ov = weekOverrideFor(prof, idx, weekKey);
+  if (!ov) return base;
+  return { name: ov.name || base.name, focus: base.focus, note: (ov.note != null ? ov.note : base.note), exercises: ov.exercises, edited: base.edited, coach: base.coach, _ovWeek: weekKey };
+}
+function workoutForWeekdayInWeek(prof, wd, weekKey) {
   const cwId = prof.customMap && prof.customMap[wd];
   if (cwId) {
     const cw = (prof.customWorkouts || []).find(c => c.id === cwId);
@@ -3597,9 +3630,10 @@ function workoutForWeekday(prof, wd) {
   if (!prof.plan) return null;
   const map = prof.plan.dayMap || {};
   const idx = map[wd] != null ? map[wd] : 0;
-  const day = prof.plan.days[idx];
-  return day ? { type: 'plan', idx, name: day.name, exercises: day.exercises } : null;
+  const day = planDayFor(prof, idx, weekKey);
+  return day ? { type: 'plan', idx, name: day.name, exercises: day.exercises, override: !!(day && day._ovWeek) } : null;
 }
+function workoutForWeekday(prof, wd) { return workoutForWeekdayInWeek(prof, wd, weekKeyThis()); }
 
 /* ============ day moves — "can't make it" reschedules, THIS WEEK only ============
    prof.dayMoves = { [mondayISO]: { [fromWd]: { to: wd|null, note, ts, by, cleared } } }
@@ -4272,6 +4306,34 @@ function sanitizePe(pe) {
 }
 
 /* ---------- documents on the wire ---------- */
+function packWeekPlan(prof) { // per-week overrides the coach set (current+future weeks only)
+  const wp = prof.plan && prof.plan.weekPlan; if (!wp) return {};
+  const cur = weekKeyThis(); const out = {};
+  for (const [wk, days] of Object.entries(wp)) {
+    if (wk < cur || !days) continue;
+    const od = {};
+    for (const [idx, ov] of Object.entries(days)) {
+      if (!ov || !Array.isArray(ov.exercises) || !ov.exercises.length) continue;
+      od[idx] = { name: (ov.name || '').slice(0, 40), note: ov.note ? String(ov.note).slice(0, 300) : '', exercises: ov.exercises.map(packPe) };
+    }
+    if (Object.keys(od).length) out[wk] = od;
+  }
+  return out;
+}
+function unpackWeekPlan(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [wk, days] of Object.entries(raw)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(wk) || !days) continue;
+    const od = {};
+    for (const [idx, ov] of Object.entries(days)) {
+      const exs = ((ov && ov.exercises) || []).map(sanitizePe).filter(Boolean);
+      if (exs.length) od[idx] = { name: (ov && ov.name) || '', note: (ov && ov.note) || '', exercises: exs };
+    }
+    if (Object.keys(od).length) out[wk] = od;
+  }
+  return out;
+}
 function buildPlanDoc(prof) { // coach workspace → athlete
   const plan = prof.plan || { days: [], daysPerWeek: 3 };
   return {
@@ -4293,6 +4355,7 @@ function buildPlanDoc(prof) { // coach workspace → athlete
     })),
     customMap: prof.customMap || {},
     dayMoves: ownDayMoves(prof, 'coach'), // coach's this-week move/skip adjustments
+    weekPlan: packWeekPlan(prof),         // coach's per-week (e.g. next-week) plan overrides
     program: prof.program || null,
   };
 }
@@ -4310,6 +4373,8 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
   prof.plan.coachRev = rev;
   if (doc.weekSchedule && typeof doc.weekSchedule === 'object') prof.quiz.weekSchedule = doc.weekSchedule;
   prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+  prof.plan.weekPlan = unpackWeekPlan(doc.weekPlan); // adopt the coach's per-week overrides
+  pruneWeekPlan(prof);
   // coach-sent custom workouts replace previous coach-sent ones; hers stay
   const hers = (prof.customWorkouts || []).filter(c => !c.fromCoach);
   const coachCustoms = (doc.customs || []).map(c => ({
@@ -4658,7 +4723,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.15.0';
+const APP_VERSION = '3.16.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4880,7 +4945,7 @@ function buildEntries(prof, exercises) {
   });
 }
 function startWorkout(prof, dayIdx, trimMin) {
-  const day = prof.plan.days[dayIdx];
+  const day = planDayFor(prof, dayIdx, weekKeyThis());   // honour a this-week override if one exists
   let exs = day.exercises, trimmed = null;
   if (trimMin) { const t = trimSession(day.exercises, trimMin); exs = t.exercises; trimmed = t; }
   const entries = buildEntries(prof, exs);
@@ -5027,6 +5092,7 @@ function render() {
   if (_elapsedIv) { clearInterval(_elapsedIv); _elapsedIv = null; }
   const app = $app();
   const prof = activeProfile();
+  if (prof && prof.plan && prof.plan.weekPlan) pruneWeekPlan(prof);   // clear last week's one-off overrides
   if (!App.workout) App.woMin = false;               // heal the minimise flag if the workout ended
   const woActive = !!App.workout, woFull = woActive && !App.woMin;
   document.body.classList.toggle('wo-min', woActive && !!App.woMin);
@@ -5427,11 +5493,12 @@ function nextWeekStripHtml(prof) {
   for (let d = 0; d < 7; d++) {
     const act = activityOn(prof, d) || 'rest';
     const isLift = act === 'lift';
-    const w4d = isLift ? workoutForWeekday(prof, d) : null;
+    const w4d = isLift ? workoutForWeekdayInWeek(prof, d, weekKeyNext()) : null;
+    const isOv = !!(w4d && w4d.override);
     const glyph = isLift ? IC('dumbbell') : IC(ACTIVITIES[act].emoji);
     const sub = isLift ? (w4d ? w4d.name : 'Lift') : (act === 'rest' ? 'Rest' : sportLabelFor(prof, act));
-    out += `<button class="pw-day${isLift ? ' lift' : ''}" data-a="nextweek-peek" data-d="${d}" title="See this day next week">
-      <span class="pw-l">${WEEKDAYS[d]}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span></button>`;
+    out += `<button class="pw-day${isLift ? ' lift' : ''}${isOv ? ' ov' : ''}" data-a="nextweek-peek" data-d="${d}" title="See this day next week">
+      <span class="pw-l">${WEEKDAYS[d]}</span><span class="pw-g">${glyph}</span><span class="pw-n">${U.esc(sub)}</span>${isOv ? '<span class="pw-ov" title="Adjusted for next week"></span>' : ''}</button>`;
   }
   return out + '</div>';
 }
@@ -5443,10 +5510,12 @@ function showNextWeekDaySheet(prof, d) {
   const act = activityOn(prof, d) || 'rest';   // base schedule — moves don't carry into next week
   let body;
   if (act === 'lift') {
-    const w4d = workoutForWeekday(prof, d);
+    const w4d = workoutForWeekdayInWeek(prof, d, weekKeyNext());
     if (w4d) {
       const day = { name: w4d.name, exercises: w4d.exercises };
-      body = `<div style="font-weight:800;font-size:14.5px">Coming up next week</div>
+      const isOv = !!w4d.override;
+      const canEdit = w4d.type === 'plan';   // athlete edits her own; coach edits the client's plan.weekPlan
+      body = `<div style="font-weight:800;font-size:14.5px">Coming up next week${isOv ? ' <span class="tag hot" style="vertical-align:2px">adjusted</span>' : ''}</div>
         <div class="muted" style="font-size:12.5px;margin-top:2px">${U.esc(day.name)} · ${day.exercises.length} exercises · ~${estMinutes(day)} min</div>
         <div class="mt8">
         ${day.exercises.map(pe => {
@@ -5456,7 +5525,9 @@ function showNextWeekDaySheet(prof, d) {
             <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${tg.w ? ' @ ' + U.fmtW(tg.w, u) + U.unitLabel(u) : ''}</span></div>`;
         }).join('')}
         </div>
-        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>`;
+        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>
+        ${canEdit ? `<button class="btn primary block mt12" data-a="nextweek-edit" data-d="${d}">Edit next week’s workout</button>` : ''}
+        ${canEdit && isOv ? `<button class="btn ghost block mt8" data-a="nextweek-revert" data-idx="${w4d.idx}">Revert to standard plan</button>` : ''}`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
     body = `<div style="font-weight:800;font-size:14.5px">${IC(ACTIVITIES[act].emoji)} ${U.esc(sportLabelFor(prof, act))}</div>
@@ -6419,11 +6490,17 @@ function renderPlanView(prof) {
     </div>
     ${coachOf ? `<div class="coach-note" style="margin-bottom:12px">This is the week ${U.esc(coachOf.athleteName)} sees. Tap any day’s to change exercises, sets, reps — and leave notes.</div>` : ''}
     ${weekCard}
+    ${coachOf && prof.plan ? `<div class="card">
+      <div class="row"><h3>Next week</h3><span class="spacer"></span><span class="muted">plan ahead</span></div>
+      <div class="muted mt8" style="font-size:12px;line-height:1.5">Set up ${U.esc(coachOf.athleteName)}’s upcoming week without touching her standard plan — tap a day to edit it. Changes sync on your next push.</div>
+      <div class="nextweek-head" style="border-top:0;padding-top:6px;margin-top:10px"><span>Next week</span><span class="nextweek-sub">tap a day</span></div>
+      ${nextWeekStripHtml(prof)}
+    </div>` : ''}
     ${plan.days.map((d, i) => `
       <div class="card day-card">
         <div class="day-head">
           <div class="day-num">${i + 1}</div>
-          <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${doneIdxWk.has(i) ? ' <span class="tag" style="vertical-align:2px;background:#E7F6E7;color:#1B7F3B">✓ done</span>' : ''}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}</h3>
+          <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${doneIdxWk.has(i) ? ' <span class="tag" style="vertical-align:2px;background:#E7F6E7;color:#1B7F3B">✓ done</span>' : ''}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}${weekOverrideFor(prof, i, weekKeyNext()) ? ' <span class="tag" style="vertical-align:2px;background:var(--coach-bg);color:var(--brand-ink)">next wk ✎</span>' : ''}</h3>
           <div class="focus">${d.focus.map(f => GROUP_LABELS[f] || f).join(' · ')} · ~${estMinutes(d)} min</div></div>
           ${prof.isCoach ? `<button class="iconbtn" data-a="tpl-save-day" data-idx="${i}" title="Save this day to my templates"></button>` : ''}
           <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day"></button>
@@ -6774,7 +6851,7 @@ function dispatch(e) {
   }
   if (a === 'start-workout') { closeSheet(); guardPausedThen(prof, () => { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); }); return; }
   // custom workout actions
-  if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a.startsWith('day-override')) return customAction(a, el, prof);
+  if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a === 'nextweek-edit' || a === 'nextweek-revert' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
   if (['wo-exit', 'wo-pause', 'wo-discard-ask', 'wo-resume', 'wo-finish', 'wo-step', 'wo-typein', 'wo-done', 'wo-warm-done', 'wo-hold', 'wo-feel', 'wo-how', 'wo-swap', 'wo-add-ex', 'wo-mkweighted', 'wo-goto-active', 'wo-min', 'wo-restore', 'wo-addset', 'wo-delset', 'rest-add', 'rest-skip'].includes(a))
     return workoutAction(a, el, prof);
@@ -7051,15 +7128,23 @@ function showBuilderSheet(prof) {
   }).join('');
   showSheet(`
     <h3 style="font-size:19px;font-weight:900">${(() => { const an = prof.isCoach && prof.coachOf ? prof.coachOf.athleteName : null;
-      return d.planIdx != null ? (an ? `Edit ${U.esc(an)}’s day` : 'Edit this plan day') : d.id ? (an ? `Edit ${U.esc(an)}’s workout` : 'Edit workout') : (an ? `Build ${U.esc(an)}’s workout` : 'Build a workout'); })()}</h3>
-    <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? 'Change anything — this overwrites the auto-generated day. Regenerating the plan builds it fresh again.' : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
+      return d.planIdx != null ? (d.scope === 'nextweek' ? (an ? `Edit ${U.esc(an)}’s next week` : 'Edit next week') : (an ? `Edit ${U.esc(an)}’s day` : 'Edit this plan day')) : d.id ? (an ? `Edit ${U.esc(an)}’s workout` : 'Edit workout') : (an ? `Build ${U.esc(an)}’s workout` : 'Build a workout'); })()}</h3>
+    <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? (d.scope === 'nextweek' ? 'Just the upcoming week — your standard plan stays as it is. Weights still auto-progress from recent lifts.' : 'This updates your standard plan (applies every week). Weights still track and progress automatically.') : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
     <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
     ${prof.isCoach ? `<textarea class="ob-input" id="cw-daynote" rows="2" maxlength="300" placeholder="Note for the whole day — shows when they start it" style="width:100%;margin-top:8px;resize:vertical;font-size:13.5px">${U.esc(d.note || '')}</textarea>` : ''}
     <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e"></div>Add your first exercise below.</div>'}</div>
     <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
+    ${d.planIdx != null ? `<div class="cw-scope">
+      <div class="cw-scope-lb">Apply to</div>
+      <div class="seg cw-scope-seg">
+        <button class="${d.scope !== 'nextweek' ? 'on' : ''}" data-a="cw-scope" data-v="plan">Whole plan</button>
+        <button class="${d.scope === 'nextweek' ? 'on' : ''}" data-a="cw-scope" data-v="nextweek">Next week only</button>
+      </div>
+      <div class="cw-scope-hint muted">${d.scope === 'nextweek' ? 'Just the upcoming week — your standard plan stays exactly as it is.' : 'Your standard weekly plan — applies every week from now on.'}</div>
+    </div>` : ''}
     <div class="row mt16">
       ${d.id ? '<button class="btn danger" data-a="cw-delete">Delete</button>' : ''}
-      <button class="btn primary" style="flex:1" data-a="cw-save">${d.planIdx != null || d.id ? 'Save changes' : 'Save workout'}</button>
+      <button class="btn primary" style="flex:1" data-a="cw-save">${d.planIdx != null ? (d.scope === 'nextweek' ? 'Save for next week' : 'Save to plan') : d.id ? 'Save changes' : 'Save workout'}</button>
     </div>`);
   const nm = document.getElementById('cw-name');
   if (nm) nm.addEventListener('input', () => { App.cwDraft.name = nm.value; });
@@ -7138,8 +7223,28 @@ function customAction(a, el, prof) {
   if (a === 'plan-edit-day') {
     const i = +el.dataset.idx;
     const day = prof.plan.days[i]; if (!day) return;
-    App.cwDraft = { id: null, planIdx: i, name: day.name, note: day.note || '', exercises: JSON.parse(JSON.stringify(day.exercises)) };
+    // opening from the full plan defaults to editing the standard plan; if the day
+    // already carries a next-week override, start from that content in that scope
+    const nwOv = weekOverrideFor(prof, i, weekKeyNext());
+    const src = (el.dataset.scope === 'nextweek') ? (nwOv || day) : day;
+    App.cwDraft = { id: null, planIdx: i, name: src.name || day.name, note: (src.note != null ? src.note : day.note) || '', exercises: JSON.parse(JSON.stringify(src.exercises)), scope: el.dataset.scope === 'nextweek' ? 'nextweek' : 'plan' };
     showBuilderSheet(prof); return;
+  }
+  if (a === 'nextweek-edit') {
+    const wd = +el.dataset.d;
+    const idx = (prof.plan.dayMap || {})[wd];
+    if (idx == null || !prof.plan.days[idx]) { toast('That day isn’t a plan workout'); return; }
+    const nwOv = weekOverrideFor(prof, idx, weekKeyNext());
+    const src = nwOv || prof.plan.days[idx];
+    closeSheet();
+    App.cwDraft = { id: null, planIdx: idx, name: src.name, note: src.note || '', exercises: JSON.parse(JSON.stringify(src.exercises)), scope: 'nextweek' };
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'nextweek-revert') {
+    const idx = +el.dataset.idx, wk = weekKeyNext();
+    if (prof.plan.weekPlan && prof.plan.weekPlan[wk]) { delete prof.plan.weekPlan[wk][idx]; if (!Object.keys(prof.plan.weekPlan[wk]).length) delete prof.plan.weekPlan[wk]; }
+    saveApp(); closeSheet(); render(); toast('Next week back to your standard plan');
+    return;
   }
   if (a === 'cw-edit') {
     const cw = customById(prof, el.dataset.id); if (!cw) return;
@@ -7147,6 +7252,7 @@ function customAction(a, el, prof) {
     showBuilderSheet(prof); return;
   }
   if (a === 'cw-add-ex') { showCwPickSheet(prof); return; }
+  if (a === 'cw-scope') { App.cwDraft.scope = el.dataset.v === 'nextweek' ? 'nextweek' : 'plan'; showBuilderSheet(prof); return; }
   if (a === 'cw-pick') {
     const ex = EX_BY_ID[el.dataset.ex];
     App.cwDraft.exercises.push(cwDefaultEntry(prof, ex));
@@ -7224,8 +7330,16 @@ function customAction(a, el, prof) {
     if (!d.exercises.length) return toast('Add at least one exercise');
     delete d.exercises[d.exercises.length - 1].ssWithNext; // last move can't pair forward
     const name = (d.name || '').trim() || 'My Workout';
-    if (d.planIdx != null) { // overwrite a generated plan day in place
-      const day = prof.plan.days[d.planIdx];
+    if (d.planIdx != null) {
+      if (d.scope === 'nextweek') { // one-off override for the upcoming week only — standard plan untouched
+        ensureWeekPlan(prof); pruneWeekPlan(prof);
+        const wk = weekKeyNext();
+        (prof.plan.weekPlan[wk] = prof.plan.weekPlan[wk] || {})[d.planIdx] = { name, note: (d.note || '').trim(), exercises: d.exercises };
+        saveApp(); closeSheet(); render();
+        toast(`Next week’s “${name}” set — your standard plan is unchanged`);
+        return;
+      }
+      const day = prof.plan.days[d.planIdx]; // whole plan (default) — edit the standard day in place
       day.name = name;
       day.exercises = d.exercises;
       day.note = (d.note || '').trim();

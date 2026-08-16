@@ -4723,7 +4723,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.16.0';
+const APP_VERSION = '3.16.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5517,7 +5517,9 @@ function showNextWeekDaySheet(prof, d) {
       const canEdit = w4d.type === 'plan';   // athlete edits her own; coach edits the client's plan.weekPlan
       body = `<div style="font-weight:800;font-size:14.5px">Coming up next week${isOv ? ' <span class="tag hot" style="vertical-align:2px">adjusted</span>' : ''}</div>
         <div class="muted" style="font-size:12.5px;margin-top:2px">${U.esc(day.name)} · ${day.exercises.length} exercises · ~${estMinutes(day)} min</div>
-        <div class="mt8">
+        ${canEdit ? `<button class="btn primary block mt12" data-a="nextweek-edit" data-d="${d}">Edit next week’s workout ›</button>` : ''}
+        ${canEdit && isOv ? `<button class="btn ghost block mt8" data-a="nextweek-revert" data-idx="${w4d.idx}">Revert to standard plan</button>` : ''}
+        <div class="mt12">
         ${day.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
           const tg = nextTargets(prof, pe);
@@ -5525,9 +5527,7 @@ function showNextWeekDaySheet(prof, d) {
             <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${tg.w ? ' @ ' + U.fmtW(tg.w, u) + U.unitLabel(u) : ''}</span></div>`;
         }).join('')}
         </div>
-        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>
-        ${canEdit ? `<button class="btn primary block mt12" data-a="nextweek-edit" data-d="${d}">Edit next week’s workout</button>` : ''}
-        ${canEdit && isOv ? `<button class="btn ghost block mt8" data-a="nextweek-revert" data-idx="${w4d.idx}">Revert to standard plan</button>` : ''}`;
+        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
     body = `<div style="font-weight:800;font-size:14.5px">${IC(ACTIVITIES[act].emoji)} ${U.esc(sportLabelFor(prof, act))}</div>
@@ -5733,7 +5733,7 @@ function renderToday(prof) {
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
       ${dayMoveSummaryHtml(prof)}
       ${lastLog ? `<div class="row mt8" style="align-items:center"><span class="muted">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</span><span class="spacer"></span><button class="btn ghost sm" data-a="go-history">Past workouts ›</button></div>` : ''}
-      ${(() => { const nw = nextWeekStripHtml(prof); return nw ? `<div class="nextweek-head"><span>Next week</span><span class="nextweek-sub">planned · tap a day</span></div>${nw}` : ''; })()}
+      ${(() => { const nw = nextWeekStripHtml(prof); return nw ? `<div class="nextweek-head"><span>Next week</span><span class="nextweek-sub">tap a day to view or edit</span></div>${nw}<div class="muted" style="font-size:11.5px;margin-top:7px;line-height:1.45">Tap any day to preview it — on a gym day you can change next week’s workout (just next week, or your whole plan).</div>` : ''; })()}
     </div>
     ${fullPlanCard}
     ${(() => {
@@ -5840,8 +5840,8 @@ function renderWorkoutEx(prof, e, ei) {
   return `<div class="wo-ex ${active ? 'active' : ''} ${complete ? 'done-ex' : ''}" data-ei="${ei}">
     <div class="wo-ex-head">
       <div style="flex:1"><div class="nm">${U.esc(ex.name)} ${ssBadge}</div><div class="wo-target">${tgt}</div>${noteLine}${lastLine}${plateLine}${hint}</div>
-      <button class="iconbtn" data-a="wo-how" data-ex="${ex.id}" title="How to"></button>
-      <button class="iconbtn" data-a="wo-swap" data-ei="${ei}" title="Swap"></button>
+      <button class="iconbtn" data-a="wo-how" data-ex="${ex.id}" title="How to">${IC('play')}</button>
+      <button class="iconbtn" data-a="wo-swap" data-ei="${ei}" title="Swap">${IC('swap')}</button>
     </div>
     <div class="sets">${warmupRows}
       ${e.sets.map((s, si) => `
@@ -6493,7 +6493,7 @@ function renderPlanView(prof) {
     ${coachOf && prof.plan ? `<div class="card">
       <div class="row"><h3>Next week</h3><span class="spacer"></span><span class="muted">plan ahead</span></div>
       <div class="muted mt8" style="font-size:12px;line-height:1.5">Set up ${U.esc(coachOf.athleteName)}’s upcoming week without touching her standard plan — tap a day to edit it. Changes sync on your next push.</div>
-      <div class="nextweek-head" style="border-top:0;padding-top:6px;margin-top:10px"><span>Next week</span><span class="nextweek-sub">tap a day</span></div>
+      <div class="nextweek-head" style="border-top:0;padding-top:6px;margin-top:10px"><span>Next week</span><span class="nextweek-sub">tap a day to edit</span></div>
       ${nextWeekStripHtml(prof)}
     </div>` : ''}
     ${plan.days.map((d, i) => `
@@ -6502,8 +6502,8 @@ function renderPlanView(prof) {
           <div class="day-num">${i + 1}</div>
           <div style="flex:1"><h3>${U.esc(d.name)}${(() => { const w = wdFor(i); return w != null ? ` <span class="tag" style="vertical-align:2px">${WEEKDAYS[w]}</span>` : ''; })()}${doneIdxWk.has(i) ? ' <span class="tag" style="vertical-align:2px;background:#E7F6E7;color:#1B7F3B">✓ done</span>' : ''}${d.edited ? ' <span class="tag hot" style="vertical-align:2px">EDITED</span>' : ''}${weekOverrideFor(prof, i, weekKeyNext()) ? ' <span class="tag" style="vertical-align:2px;background:var(--coach-bg);color:var(--brand-ink)">next wk ✎</span>' : ''}</h3>
           <div class="focus">${d.focus.map(f => GROUP_LABELS[f] || f).join(' · ')} · ~${estMinutes(d)} min</div></div>
-          ${prof.isCoach ? `<button class="iconbtn" data-a="tpl-save-day" data-idx="${i}" title="Save this day to my templates"></button>` : ''}
-          <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day"></button>
+          ${prof.isCoach ? `<button class="iconbtn" data-a="tpl-save-day" data-idx="${i}" title="Save this day to my templates">${IC('star')}</button>` : ''}
+          <button class="iconbtn" data-a="plan-edit-day" data-idx="${i}" title="Edit this day">${IC('edit')}</button>
           ${prof.isCoach ? '' : `<button class="btn sm ${doneIdxWk.has(i) ? 'ghost' : 'dark'}" data-a="start-workout" data-idx="${i}">${doneIdxWk.has(i) ? 'Again' : 'Start'}</button>`}
         </div>
         ${d.note ? `<div class="coach-note" style="margin-top:8px">${U.esc(d.note)}</div>` : ''}
@@ -6528,7 +6528,7 @@ function renderPlanView(prof) {
             <div class="meta">${c.exercises.length} exercises · ~${estMinutes(c)} min${days.length ? ' · ' + days.join(', ') : ''}</div></span>
             <button class="btn sm ghost" data-a="cw-assign-open" data-id="${c.id}">Days</button>
             <button class="btn sm ghost" data-a="cw-edit" data-id="${c.id}">Edit</button>
-            ${prof.isCoach ? `<button class="btn sm ghost" data-a="tpl-save-cw" data-id="${c.id}" title="Save to my templates"></button>` : `<button class="btn sm dark" data-a="start-custom" data-id="${c.id}">Start</button>`}
+            ${prof.isCoach ? `<button class="btn sm ghost" data-a="tpl-save-cw" data-id="${c.id}" title="Save to my templates">${IC('star')}</button>` : `<button class="btn sm dark" data-a="start-custom" data-id="${c.id}">Start</button>`}
           </div>`;
         }).join('')}</div>` :
       `<p class="muted mt8" style="line-height:1.5">Fancy full control? Build a workout from scratch — pick the exercises, sets and reps — then drop it onto any day of your week. Progression still tracks everything.</p>`}
@@ -7129,19 +7129,19 @@ function showBuilderSheet(prof) {
   showSheet(`
     <h3 style="font-size:19px;font-weight:900">${(() => { const an = prof.isCoach && prof.coachOf ? prof.coachOf.athleteName : null;
       return d.planIdx != null ? (d.scope === 'nextweek' ? (an ? `Edit ${U.esc(an)}’s next week` : 'Edit next week') : (an ? `Edit ${U.esc(an)}’s day` : 'Edit this plan day')) : d.id ? (an ? `Edit ${U.esc(an)}’s workout` : 'Edit workout') : (an ? `Build ${U.esc(an)}’s workout` : 'Build a workout'); })()}</h3>
-    <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? (d.scope === 'nextweek' ? 'Just the upcoming week — your standard plan stays as it is. Weights still auto-progress from recent lifts.' : 'This updates your standard plan (applies every week). Weights still track and progress automatically.') : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
-    <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
-    ${prof.isCoach ? `<textarea class="ob-input" id="cw-daynote" rows="2" maxlength="300" placeholder="Note for the whole day — shows when they start it" style="width:100%;margin-top:8px;resize:vertical;font-size:13.5px">${U.esc(d.note || '')}</textarea>` : ''}
-    <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e"></div>Add your first exercise below.</div>'}</div>
-    <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
+    <p class="muted mt8" style="margin-bottom:10px">${d.planIdx != null ? 'Adjust the exercises, sets and reps — progression keeps flexing automatically.' : 'Your exercises, your order, your scheme. Progression still tracks every lift automatically.'}</p>
     ${d.planIdx != null ? `<div class="cw-scope">
-      <div class="cw-scope-lb">Apply to</div>
+      <div class="cw-scope-lb">Apply changes to</div>
       <div class="seg cw-scope-seg">
         <button class="${d.scope !== 'nextweek' ? 'on' : ''}" data-a="cw-scope" data-v="plan">Whole plan</button>
         <button class="${d.scope === 'nextweek' ? 'on' : ''}" data-a="cw-scope" data-v="nextweek">Next week only</button>
       </div>
       <div class="cw-scope-hint muted">${d.scope === 'nextweek' ? 'Just the upcoming week — your standard plan stays exactly as it is.' : 'Your standard weekly plan — applies every week from now on.'}</div>
     </div>` : ''}
+    <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
+    ${prof.isCoach ? `<textarea class="ob-input" id="cw-daynote" rows="2" maxlength="300" placeholder="Note for the whole day — shows when they start it" style="width:100%;margin-top:8px;resize:vertical;font-size:13.5px">${U.esc(d.note || '')}</textarea>` : ''}
+    <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e"></div>Add your first exercise below.</div>'}</div>
+    <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
     <div class="row mt16">
       ${d.id ? '<button class="btn danger" data-a="cw-delete">Delete</button>' : ''}
       <button class="btn primary" style="flex:1" data-a="cw-save">${d.planIdx != null ? (d.scope === 'nextweek' ? 'Save for next week' : 'Save to plan') : d.id ? 'Save changes' : 'Save workout'}</button>
@@ -7588,7 +7588,7 @@ function showHistorySheet(prof, logId) {
           ${ex.timed ? '' : `<input class="hist-in" id="hi-w" type="text" inputmode="decimal" value="${st.w > 0 ? U.fmtW(st.w, u) : ''}" placeholder="${U.unitLabel(u)}">×`}
           <input class="hist-in" id="hi-r" type="text" inputmode="numeric" value="${st.reps}" placeholder="${ex.timed ? 'sec' : 'reps'}">
           <button class="hist-ok" data-a="hist-commit" data-ei="${ei}" data-si="${si}">✓</button>
-          <button class="hist-del" data-a="hist-delset" data-ei="${ei}" data-si="${si}" title="Remove this set"></button>
+          <button class="hist-del" data-a="hist-delset" data-ei="${ei}" data-si="${si}" title="Remove this set">${IC('close')}</button>
         </span>`;
       }
       const lbl = ex.timed ? `${st.reps}s` : `${st.w > 0 ? U.fmtW(st.w, u) : 'BW'}×${st.reps}`;

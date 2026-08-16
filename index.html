@@ -882,6 +882,82 @@ button.pw-day { font-family: inherit; }
   background: var(--tint); color: var(--ink); border: 1px solid var(--line); }
 
 </style>
+<style id="exart-css">/* exercise illustrations v3.13 (male; female -> [data-sex=female] later) */
+.exart{background:var(--ink);-webkit-mask-image:var(--m);mask-image:var(--m);-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-mode:alpha;mask-mode:alpha;display:block}.ex-row .thumb .exart{width:100%;height:100%}.exart-hero{position:relative;height:188px;border-radius:16px;background:var(--tint);overflow:hidden;display:grid;place-items:center;margin-bottom:12px}.exart-hero::before{content:"";position:absolute;width:60%;height:80%;border-radius:50%;background:var(--grad-soft)}.exart-hero .exart{position:relative;width:82%;height:88%}
+.ea-air_squat{--m:url(air_squat.webp)}
+.ea-assisted_dip{--m:url(assisted_dip.webp)}
+.ea-assisted_pullup{--m:url(assisted_pullup.webp)}
+.ea-back_ext{--m:url(back_ext.webp)}
+.ea-bb_backsquat{--m:url(bb_backsquat.webp)}
+.ea-bench_bb{--m:url(bench_bb.webp)}
+.ea-bench_db{--m:url(bench_db.webp)}
+.ea-birddog{--m:url(birddog.webp)}
+.ea-bulg_split{--m:url(bulg_split.webp)}
+.ea-cable_fly{--m:url(cable_fly.webp)}
+.ea-cable_kickback{--m:url(cable_kickback.webp)}
+.ea-cable_pullthrough{--m:url(cable_pullthrough.webp)}
+.ea-calf_raise{--m:url(calf_raise.webp)}
+.ea-chestsup_row{--m:url(chestsup_row.webp)}
+.ea-crunch{--m:url(crunch.webp)}
+.ea-curl_bb{--m:url(curl_bb.webp)}
+.ea-curl_db{--m:url(curl_db.webp)}
+.ea-db_fly{--m:url(db_fly.webp)}
+.ea-deadbug{--m:url(deadbug.webp)}
+.ea-deadlift_bb{--m:url(deadlift_bb.webp)}
+.ea-dips{--m:url(dips.webp)}
+.ea-facepull{--m:url(facepull.webp)}
+.ea-farmer_carry{--m:url(farmer_carry.webp)}
+.ea-front_squat{--m:url(front_squat.webp)}
+.ea-glute_bridge{--m:url(glute_bridge.webp)}
+.ea-goblet_squat{--m:url(goblet_squat.webp)}
+.ea-goodmorning{--m:url(goodmorning.webp)}
+.ea-hack_squat{--m:url(hack_squat.webp)}
+.ea-hammer_curl{--m:url(hammer_curl.webp)}
+.ea-hang_kneeraise{--m:url(hang_kneeraise.webp)}
+.ea-hip_abduction{--m:url(hip_abduction.webp)}
+.ea-hipthrust_bb{--m:url(hipthrust_bb.webp)}
+.ea-incline_db{--m:url(incline_db.webp)}
+.ea-inverted_row{--m:url(inverted_row.webp)}
+.ea-kb_swing{--m:url(kb_swing.webp)}
+.ea-lat_raise{--m:url(lat_raise.webp)}
+.ea-leg_curl{--m:url(leg_curl.webp)}
+.ea-leg_ext{--m:url(leg_ext.webp)}
+.ea-leg_press{--m:url(leg_press.webp)}
+.ea-legraise{--m:url(legraise.webp)}
+.ea-lunge_bw{--m:url(lunge_bw.webp)}
+.ea-lunge_db{--m:url(lunge_db.webp)}
+.ea-machine_chest{--m:url(machine_chest.webp)}
+.ea-machine_hipthrust{--m:url(machine_hipthrust.webp)}
+.ea-machine_latraise{--m:url(machine_latraise.webp)}
+.ea-mount_climber{--m:url(mount_climber.webp)}
+.ea-oh_tri_ext{--m:url(oh_tri_ext.webp)}
+.ea-ohp_bb{--m:url(ohp_bb.webp)}
+.ea-ohp_db{--m:url(ohp_db.webp)}
+.ea-pike_pushup{--m:url(pike_pushup.webp)}
+.ea-plank{--m:url(plank.webp)}
+.ea-pulldown{--m:url(pulldown.webp)}
+.ea-pullover_db{--m:url(pullover_db.webp)}
+.ea-pullup{--m:url(pullup.webp)}
+.ea-pushdown{--m:url(pushdown.webp)}
+.ea-pushup{--m:url(pushup.webp)}
+.ea-rdl_bb{--m:url(rdl_bb.webp)}
+.ea-rdl_db{--m:url(rdl_db.webp)}
+.ea-reardelt_fly{--m:url(reardelt_fly.webp)}
+.ea-row_bb{--m:url(row_bb.webp)}
+.ea-row_cable{--m:url(row_cable.webp)}
+.ea-row_db{--m:url(row_db.webp)}
+.ea-russian_twist{--m:url(russian_twist.webp)}
+.ea-seated_legcurl{--m:url(seated_legcurl.webp)}
+.ea-shrug_db{--m:url(shrug_db.webp)}
+.ea-side_plank{--m:url(side_plank.webp)}
+.ea-skullcrusher{--m:url(skullcrusher.webp)}
+.ea-sl_rdl{--m:url(sl_rdl.webp)}
+.ea-stepup_db{--m:url(stepup_db.webp)}
+.ea-superman{--m:url(superman.webp)}
+.ea-upright_row_db{--m:url(upright_row_db.webp)}
+.ea-walking_lunge_db{--m:url(walking_lunge_db.webp)}
+</style>
+
 </head>
 <body>
 <div id="app"></div>
@@ -4562,7 +4638,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.12.1';
+const APP_VERSION = '3.13.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5949,6 +6025,7 @@ function showConfirm(title, text, keepLabel, actLabel, cb) {
 /* ============ EXERCISE DETAIL SHEET ============ */
 function showExerciseSheet(exId, prof) {
   const ex = EX_BY_ID[exId];
+  const hasArt = typeof EXART_HAS !== 'undefined' && EXART_HAS.has(exId);
   const st = prof && prof.exState && prof.exState[exId];
   const pr = prof && prof.prs && prof.prs[exId];
   const stats = (st && st.history.length) || pr ? `
@@ -5982,8 +6059,9 @@ function showExerciseSheet(exId, prof) {
     </div>
     <div class="vid-note" id="vid-offline-note" hidden></div>${coachChips}${fallbackNote}` : '';
   showSheet(`
+    ${exArtHero(exId)}
     ${videoBlock}
-    <div id="exd-animwrap">
+    <div id="exd-animwrap" ${hasArt ? 'hidden' : ''}>
       ${v ? '<button class="btn ghost sm" id="anim-toggle" style="width:100%;margin-top:10px">Prefer the illustration? Show it</button>' : ''}
       <div class="exd-anim" id="exd-animbox" ${v ? 'hidden' : ''} style="${v ? 'margin-top:10px' : ''}"><canvas id="exd-cv"></canvas></div>
     </div>
@@ -6021,9 +6099,9 @@ function showExerciseSheet(exId, prof) {
     if (animStarted) return; animStarted = true;
     const box = document.getElementById('exd-animbox');
     if (box) box.hidden = false;
-    _sheetPlayers.push(AnimEngine.play(document.getElementById('exd-cv'), ex.anim));
+    const _cv = document.getElementById('exd-cv'); if (_cv) _sheetPlayers.push(AnimEngine.play(_cv, ex.anim));
   };
-  if (!v) startAnim();
+  if (!v && !hasArt) startAnim();
   else {
     const tg = document.getElementById('anim-toggle');
     if (tg) tg.addEventListener('click', () => {
@@ -6044,7 +6122,7 @@ function showExerciseSheet(exId, prof) {
         if (r) r.addEventListener('click', () => showExerciseSheet(exId, prof));
       }
       const tg2 = document.getElementById('anim-toggle'); if (tg2) tg2.hidden = true;
-      startAnim();
+      if (!hasArt) startAnim();
     };
     const pb = document.getElementById('vid-play');
     if (pb) pb.addEventListener('click', () => {
@@ -6075,9 +6153,12 @@ function showExerciseSheet(exId, prof) {
 }
 
 /* ============ SWAP / ADD SHEETS ============ */
+const EXART_HAS = new Set(["air_squat", "assisted_dip", "assisted_pullup", "back_ext", "bb_backsquat", "bench_bb", "bench_db", "birddog", "bulg_split", "cable_fly", "cable_kickback", "cable_pullthrough", "calf_raise", "chestsup_row", "crunch", "curl_bb", "curl_db", "db_fly", "deadbug", "deadlift_bb", "dips", "facepull", "farmer_carry", "front_squat", "glute_bridge", "goblet_squat", "goodmorning", "hack_squat", "hammer_curl", "hang_kneeraise", "hip_abduction", "hipthrust_bb", "incline_db", "inverted_row", "kb_swing", "lat_raise", "leg_curl", "leg_ext", "leg_press", "legraise", "lunge_bw", "lunge_db", "machine_chest", "machine_hipthrust", "machine_latraise", "mount_climber", "oh_tri_ext", "ohp_bb", "ohp_db", "pike_pushup", "plank", "pulldown", "pullover_db", "pullup", "pushdown", "pushup", "rdl_bb", "rdl_db", "reardelt_fly", "row_bb", "row_cable", "row_db", "russian_twist", "seated_legcurl", "shrug_db", "side_plank", "skullcrusher", "sl_rdl", "stepup_db", "superman", "upright_row_db", "walking_lunge_db"]);
+function exArtThumb(id){ return EXART_HAS.has(id) ? '<div class="exart ea-'+id+'"></div>' : ''; }
+function exArtHero(id){ return EXART_HAS.has(id) ? '<div class="exart-hero"><div class="exart ea-'+id+'"></div></div>' : ''; }
 function exRowHtml(ex, action, extra) {
   return `<button class="ex-row" data-a="${action}" data-ex="${ex.id}" ${extra || ''}>
-    <span class="thumb">${patternEmoji(ex)}</span>
+    <span class="thumb">${exArtThumb(ex.id)}</span>
     <span><span class="nm">${U.esc(ex.name)}</span>
     <div class="mu">${ex.m.p.map(m => MUSCLES[m].label).join(', ')}</div></span>
     <span class="lvl">${ex.lvl === 1 ? 'EASY' : ex.lvl === 2 ? 'MODERATE' : 'ADVANCED'}</span>

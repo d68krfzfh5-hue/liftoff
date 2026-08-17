@@ -290,6 +290,14 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .feel { display: flex; gap: 8px; margin-top: 10px; }
 .feel button { flex: 1; padding: 9px; border-radius: 11px; background: rgba(20,22,34,0.045); font-weight: 700; font-size: 13px; color: var(--ink2); }
 .feel button.on { background: var(--ink); color: var(--on-ink); }
+.pvl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 1px 0 7px 22px; font-size: 11px; font-weight: 700; }
+.pvl-w { color: var(--ink3); }
+.pvl-w.up { color: #1B7F3B; }
+.pvl-w.down { color: #B26A00; }
+.pvl-f { color: var(--ink3); }
+.pvl-f.hard { color: #C0302C; }
+.pvl-f.easy { color: #1B7F3B; }
+.pvl-dot { color: var(--ink3); opacity: .5; }
 .wo-head { position: sticky; top: 0; z-index: 12; background: var(--bg); padding-bottom: 10px; }
 .wo-topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 2px 8px; }
 .wo-topbar .t { font-weight: 900; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -564,6 +572,14 @@ a.vid-retry { text-decoration: none; display: inline-block; }
 .cwx-ctl b { font-size: 13px; min-width: 26px; text-align: center; white-space: nowrap; }
 .cwx-ctl button { font-size: 16px; font-weight: 800; color: var(--ink2); padding: 0 5px; }
 .cwx-rest b { color: var(--violet); }
+.cwx-weight { display: flex; align-items: center; gap: 6px; margin-top: 8px; background: rgba(20,22,34,0.045); border-radius: 10px; padding: 5px 10px; }
+.cwx-weight .lb { font-size: 9.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.4px; }
+.cwx-weight button.wstep { font-size: 17px; font-weight: 800; color: var(--ink2); padding: 0 7px; }
+.cwx-weight b.cwv { font-size: 13.5px; min-width: 52px; text-align: center; white-space: nowrap; cursor: text; border-bottom: 1.5px dashed rgba(20,22,34,0.28); padding-bottom: 1px; line-height: 1.05; }
+.cwx-weight b.cwv.auto { color: var(--ink3); font-weight: 800; }
+.cwx-weight b.cwv:active { opacity: 0.55; }
+.cwx-weight .cwx-auto { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--violet); background: var(--coach-bg); border-radius: 8px; padding: 4px 9px; }
+.cwx-weight .cwx-hint { margin-left: auto; font-size: 10.5px; color: var(--ink3); font-style: italic; }
 .cwx-ctl b.cwv { cursor: text; border-bottom: 1.5px dashed rgba(20,22,34,0.28); padding-bottom: 1px; line-height: 1.05; }
 .cwx-ctl b.cwv:active { opacity: 0.55; }
 .cwx-ctl b.cwv:has(.cwv-input) { border-bottom-color: transparent; }
@@ -3193,10 +3209,9 @@ function nextTargets(profile, planEx) {
   return { w: st.w, reps, sets: planEx.sets, isNew: st.w == null && !ex.bw && !ex.timed };
 }
 
-/* A conservative STARTING-weight estimate for a weighted exercise she hasn't logged
-   yet — so the plan shows a number to aim for. Rough by design (scaled to equipment,
-   compound-vs-isolation, experience and sex); it fine-tunes the moment she logs a set.
-   Shown with a leading "~". Returns null for bodyweight / timed moves. */
+/* A conservative STARTING-weight estimate for a weighted move she hasn't logged
+   yet (rough by design; scaled to equipment, compound-vs-isolation, experience,
+   sex). Shown with a leading "~"; fine-tunes the moment she logs a set. */
 const ISO_PATTERNS = ['bi', 'tri', 'deltside', 'reardelt', 'calf', 'hamiso', 'gluteiso', 'chestiso', 'quadiso', 'coreanti', 'coreflex', 'corerot'];
 function startWeightEst(profile, ex) {
   if (!ex || ex.bw || ex.timed) return null;
@@ -3208,18 +3223,19 @@ function startWeightEst(profile, ex) {
   let base;
   if (eq.includes('barbell')) base = ['deadlift', 'hinge', 'squat', 'hthrust'].includes(ex.pattern) ? 40 : 25;
   else if (eq.includes('machine') || eq.includes('cable')) base = iso ? 15 : 27;
-  else if (eq.includes('dumbbell') || eq.includes('kettlebell')) base = iso ? 6 : 12;   // per implement
+  else if (eq.includes('dumbbell') || eq.includes('kettlebell')) base = iso ? 6 : 12;
   else base = 8;
   if (iso && eq.includes('barbell')) base *= 0.6;
   const step = roundStepFor(ex);
   return Math.max(step, Math.round(base * lvlF * sexF / step) * step);
 }
-/* the weight string shown next to a plan exercise. Coach reads the client's synced
-   top set; the athlete reads her own progression. Falls back to a ~estimate. */
-function planWeightDisplay(profile, planEx) {
+/* numeric weight behind a plan exercise. A pinned weight (coach/athlete set)
+   wins; else coach reads the client's synced top set, the athlete reads her own
+   progression; else a conservative ~estimate. kind marks which source we used. */
+function resolvePlanWeight(profile, planEx) {
   const ex = EX_BY_ID[planEx.exId];
-  if (!ex || ex.bw || ex.timed) return '';
-  const u = profile.units;
+  if (!ex || ex.bw || ex.timed) return { w: null, kind: null };
+  if (planEx.w != null) return { w: +planEx.w, kind: 'pinned' };
   let w = null;
   if (profile.isCoach && profile.coachOf) {
     const et = (profile.coachOf.progress && profile.coachOf.progress.exTop) || {};
@@ -3227,9 +3243,18 @@ function planWeightDisplay(profile, planEx) {
   } else {
     w = nextTargets(profile, planEx).w;
   }
-  if (w) return ' @ ' + U.fmtW(w, u) + U.unitLabel(u);
+  if (w) return { w: +w, kind: 'projected' };
   const est = startWeightEst(profile, ex);
-  return est ? ' ~' + U.fmtW(est, u) + U.unitLabel(u) : '';
+  return est ? { w: +est, kind: 'estimate' } : { w: null, kind: null };
+}
+/* the weight shown next to a plan exercise: ' @ 40kg' when pinned/known, ' ~40kg'
+   for an estimate, '' for bodyweight/timed moves. */
+function planWeightDisplay(profile, planEx) {
+  const r = resolvePlanWeight(profile, planEx);
+  if (r.w == null) return '';
+  const u = profile.units;
+  const sep = r.kind === 'estimate' ? ' ~' : ' @ ';
+  return sep + U.fmtW(r.w, u) + U.unitLabel(u);
 }
 
 /* After a workout is finished: update per-exercise state; returns array of feedback msgs */
@@ -3286,17 +3311,18 @@ function applyProgression(profile, log) {
       } else {
         msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: holding ${st.w}kg to consolidate.` });
       }
-    } else { // double progression
-      if (allTop && !hard) {
+    } else { // double progression — bump the WEIGHT once she completes all sets in range (not only at the very top)
+      const fullSets = done.length >= (entry.plan ? entry.plan.sets : done.length);
+      if (fullSets && !hard) {
         st.w = U.round((st.w || topW) + ex.inc, 0.5); st.repTarget = planEx.repsMin; st.ups++; st.fails = 0;
-        msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: all sets at the top of the range — weight goes up to ${st.w}kg!` });
-      } else if (allTop && hard) {
-        st.repTarget = planEx.repsMax;
-        msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: that was a grind — repeat ${st.w}kg once more, then up.` });
+        msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: all sets in range — weight goes up to ${st.w}kg next time!` });
+      } else if (fullSets && hard) {
+        st.repTarget = allTop ? planEx.repsMax : Math.min(Math.max(...done.map(s => s.reps)) + 1, planEx.repsMax);
+        msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: tough one — repeat ${st.w}kg, then it climbs.` });
       } else {
         const minDone = Math.min(...done.map(s => s.reps));
-        st.repTarget = Math.min(minDone + 1, planEx.repsMax);
-        msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: same weight, aim for ${st.repTarget} reps on every set.` });
+        st.repTarget = Math.min(Math.max(minDone, planEx.repsMin) + 1, planEx.repsMax);
+        msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: finish all ${planEx.sets} sets to move up — ${st.w}kg again next time.` });
       }
     }
   }
@@ -4327,6 +4353,7 @@ function packPe(pe) {
   if (pe.slotType) o.slotType = pe.slotType;
   if (pe.ssWithNext) o.ssWithNext = true;
   if (pe.note) o.note = String(pe.note).slice(0, 200);
+  if (pe.w != null && isFinite(+pe.w)) o.w = +pe.w;   // coach-pinned weight
   return o;
 }
 function sanitizePe(pe) {
@@ -4343,6 +4370,7 @@ function sanitizePe(pe) {
     timed,
     slotType: typeof pe.slotType === 'string' ? pe.slotType.slice(0, 12) : 'acc',
     ssWithNext: !!pe.ssWithNext,
+    w: (pe.w != null && isFinite(+pe.w) && +pe.w > 0) ? U.clamp(+pe.w, 0, 999) : undefined,
     note: pe.note ? String(pe.note).slice(0, 200) : undefined,
   };
 }
@@ -4485,7 +4513,7 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
     logs: (prof.logs || []).filter(l => l.date >= cut).slice(-45).map(l => ({
       date: l.date, dayName: l.dayName, durationMin: l.durationMin,
       react: l.react || null, note: l.note ? String(l.note).slice(0, 200) : null,
-      entries: (l.entries || []).map(e => ({ exId: e.exId, sets: (e.sets || []).map(s => ({ w: s.w || 0, reps: s.reps || 0 })) })),
+      entries: (l.entries || []).map(e => ({ exId: e.exId, feel: e.feel || null, targetW: (e.targetW != null ? e.targetW : null), coachSet: !!e.coachSet, sets: (e.sets || []).map(s => ({ w: s.w || 0, reps: s.reps || 0 })) })),
     })),
     msgReact: prof.coachMsgReact || null,
     dayMoves: ownDayMoves(prof, 'athlete'), // her this-week reschedules/skips, for the coach
@@ -4765,7 +4793,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.17.1';
+const APP_VERSION = '3.18.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -4975,6 +5003,7 @@ function buildEntries(prof, exercises) {
   const rm = readinessToday(prof);
   return exercises.map(pe => {
     let t = nextTargets(prof, pe);
+    if (pe.w != null) t = Object.assign({}, t, { w: pe.w, isNew: false });   // coach/athlete-pinned weight overrides the auto target
     if (easy) t = applyDeload(prof, pe, Object.assign({ sets: pe.sets }, t));
     const ex0 = EX_BY_ID[pe.exId];
     if (rm && rm.mod !== 1 && t.w && ex0 && !ex0.bw && !ex0.timed) {  // readiness eases/bumps today's loads
@@ -4983,7 +5012,7 @@ function buildEntries(prof, exercises) {
     const nSets = easy && t.sets ? t.sets : pe.sets;
     const sets = [];
     for (let i = 0; i < nSets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
-    return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew };
+    return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew, targetW: (t.w != null ? t.w : null), coachSet: pe.w != null };
   });
 }
 function startWorkout(prof, dayIdx, trimMin) {
@@ -5030,7 +5059,7 @@ function finishWorkout(prof) {
   const log = {
     id: w.id, date: w.date, dayName: w.dayName, dayIdx: (w.dayIdx != null ? w.dayIdx : null),
     durationMin: Math.max(1, Math.round((Date.now() - w.startTs - (w.pauseMs || 0)) / 60000)),
-    entries: w.entries.map(e => ({ exId: e.exId, plan: e.plan, feel: e.feel, sets: e.sets.filter(s => s.done) }))
+    entries: w.entries.map(e => ({ exId: e.exId, plan: e.plan, feel: e.feel, targetW: (e.targetW != null ? e.targetW : null), coachSet: !!e.coachSet, sets: e.sets.filter(s => s.done) }))
       .filter(e => e.sets.length),
   };
   const prs = detectPRs(prof, log);
@@ -5448,6 +5477,29 @@ function weekStripHtml(prof) {
 /* ---- tap a week day → what you did / what's coming ----
    Works on the athlete's own data, and in a coach workspace it reads the
    client's synced progress (logs, PRs, sport days, units) instead. */
+/* the change-log line under a finished exercise: how the weight actually lifted
+   compared to what was prescribed (coach-pinned or auto), plus how it felt — so
+   coach and athlete can see what happened and talk about why. */
+const PVL_FEEL = { easy: 'felt easy', hard: 'felt hard' };
+function prescribedVsLifted(e, ex, u) {
+  const bits = [];
+  if (ex && !ex.bw && !ex.timed && e.targetW != null && e.sets && e.sets.length) {
+    const lifted = e.sets.reduce((m, s) => Math.max(m, +s.w || 0), 0);
+    const presc = +e.targetW;
+    if (lifted > 0) {
+      const diff = U.round(lifted - presc, 0.5);
+      const src = e.coachSet ? 'coach set' : 'target';
+      if (Math.abs(diff) >= 0.5) {
+        const dir = diff > 0 ? 'up' : 'down';
+        bits.push(`<span class="pvl-w ${dir}">${src} ${U.fmtW(presc, u)}${U.unitLabel(u)} → ${U.fmtW(lifted, u)}${U.unitLabel(u)} ${diff > 0 ? '▲' : '▼'}${U.fmtW(Math.abs(diff), u)}</span>`);
+      } else if (e.coachSet) {
+        bits.push(`<span class="pvl-w">coach set ${U.fmtW(presc, u)}${U.unitLabel(u)} · hit it</span>`);
+      }
+    }
+  }
+  if (e.feel && PVL_FEEL[e.feel]) bits.push(`<span class="pvl-f ${e.feel}">${PVL_FEEL[e.feel]}</span>`);
+  return bits.length ? `<div class="pvl">${bits.join('<span class="pvl-dot">·</span>')}</div>` : '';
+}
 function showDayPeekSheet(prof, d) {
   const t = todayWeekday();
   const mon = U.parseISO(U.weekKey(U.todayISO()));
@@ -5477,7 +5529,7 @@ function showDayPeekSheet(prof, d) {
       ${l.entries.map(e => {
         const ex = EX_BY_ID[e.exId]; if (!ex) return '';
         return `<div class="plan-ex"><span class="dot"></span>${U.esc(ex.name)}
-          <span class="sr">${e.sets.map(s => setStr(ex, s)).join(' · ')}</span></div>`;
+          <span class="sr">${e.sets.map(s => setStr(ex, s)).join(' · ')}</span></div>${prescribedVsLifted(e, ex, u)}`;
       }).join('')}
       </div>
       ${l.note ? `<div class="coach-note" style="margin-top:8px">${U.esc(l.note)}</div>` : ''}`).join('');
@@ -5492,8 +5544,9 @@ function showDayPeekSheet(prof, d) {
         <div class="mt8">
         ${day.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
+          const wd = planWeightDisplay(prof, pe);
           return `<div class="plan-ex"><span class="dot"></span>${U.esc(ex.name)}
-            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${planWeightDisplay(prof, pe)}</span></div>`;
+            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${wd}</span></div>`;
         }).join('')}
         </div>
         ${when === 'today' && !isCoach
@@ -5563,11 +5616,12 @@ function showNextWeekDaySheet(prof, d) {
         <div class="mt12">
         ${day.exercises.map(pe => {
           const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
+          const wd = planWeightDisplay(prof, pe);
           return `<div class="plan-ex">${EXART_HAS.has(pe.exId) ? '<span class="pe-art"><div class="exart ea-' + pe.exId + '"></div></span>' : '<span class="dot"></span>'}${U.esc(ex.name)}
-            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${planWeightDisplay(prof, pe)}</span></div>`;
+            <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${wd}</span></div>`;
         }).join('')}
         </div>
-        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights come from ${prof.isCoach && prof.coachOf ? 'her' : 'your'} recent lifts; <b>~</b> is a starting estimate until ${prof.isCoach && prof.coachOf ? 'she logs' : 'you log'} that move — everything fine-tunes with training.</div>`;
+        <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
     body = `<div style="font-weight:800;font-size:14.5px">${IC(ACTIVITIES[act].emoji)} ${U.esc(sportLabelFor(prof, act))}</div>
@@ -5668,10 +5722,10 @@ function renderToday(prof) {
     const day = { name: w4d.name, exercises: w4d.exercises };
     const dayList = day.exercises.slice(0, 6).map(pe => {
       const ex = EX_BY_ID[pe.exId];
-      const t = nextTargets(prof, pe);
+      const wd = planWeightDisplay(prof, pe);
       return `<div class="plan-ex">
         ${EXART_HAS.has(pe.exId) ? '<span class="pe-art"><div class="exart ea-' + pe.exId + '"></div></span>' : '<span class="dot"></span>'}${U.esc(ex.name)}
-        <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${t.w ? ' · ' + U.fmtW(t.w, u) + U.unitLabel(u) : ''}</span>
+        <span class="sr">${pe.sets}×${pe.timed ? pe.repsMin + '–' + pe.repsMax + 's' : pe.repsMin + '–' + pe.repsMax}${wd}</span>
       </div>`;
     }).join('');
     hero = `<div class="card hero">
@@ -6617,10 +6671,10 @@ function renderPlanView(prof) {
         ${d.note ? `<div class="coach-note" style="margin-top:8px">${U.esc(d.note)}</div>` : ''}
         <div class="mt8">
         ${d.exercises.map(pe => {
-          const ex = EX_BY_ID[pe.exId];
+          const ex = EX_BY_ID[pe.exId]; const wd = planWeightDisplay(prof, pe);
           return `<button class="plan-ex" style="width:100%;text-align:left" data-a="ex-open" data-ex="${ex.id}">
             <span class="dot"></span>${U.esc(ex.name)}
-            <span class="sr">${pe.sets}×${pe.repsMin}–${pe.repsMax}${pe.timed ? 's' : ''}${planWeightDisplay(prof, pe)}</span>
+            <span class="sr">${pe.sets}×${pe.repsMin}–${pe.repsMax}${pe.timed ? 's' : ''}${wd}</span>
           </button>`;
         }).join('')}
         </div>
@@ -7248,6 +7302,11 @@ function showBuilderSheet(prof) {
           <button data-a="cw-reststep" data-i="${i}" data-d="-1">−</button><b class="cwv" data-a="cw-typein" data-i="${i}" data-f="rest" title="Tap to type — seconds or 1:30">${U.fmtDur(pe.rest)}</b><button data-a="cw-reststep" data-i="${i}" data-d="1">+</button></div>
         ${i < d.exercises.length - 1 ? `<button class="cwx-ctl cwx-link ${pe.ssWithNext ? 'on' : ''}" data-a="cw-link" data-i="${i}"><span class="lb">Pair</span><b>${pe.ssWithNext ? 'superset' : '+ superset'}</b></button>` : ''}
       </div>
+      ${(!ex.bw && !ex.timed) ? `<div class="cwx-weight"><span class="lb">Weight</span>
+        <button class="wstep" data-a="cw-wstep" data-i="${i}" data-d="-1">−</button>
+        <b class="cwv ${pe.w == null ? 'auto' : ''}" data-a="cw-typein" data-i="${i}" data-f="w" title="Tap to type — or leave on Auto">${pe.w != null ? U.fmtW(pe.w, prof.units) + U.unitLabel(prof.units) : 'Auto'}</b>
+        <button class="wstep" data-a="cw-wstep" data-i="${i}" data-d="1">+</button>
+        ${pe.w != null ? `<button class="cwx-auto" data-a="cw-wclear" data-i="${i}">↺ Auto</button>` : `<span class="cwx-hint">progression sets it</span>`}</div>` : ''}
       ${prof.isCoach ? `<input class="cwx-note" data-i="${i}" placeholder="Note for this exercise — e.g. slow 3s down" maxlength="200" value="${U.esc(pe.note || '')}">` : ''}
     </div>`;
   }).join('');
@@ -7399,6 +7458,19 @@ function customAction(a, el, prof) {
     if (f === 'repsMax') pe.repsMax = U.clamp(pe.repsMax + delta * (pe.timed ? 5 : 1), pe.repsMin + 1, pe.timed ? 300 : 30);
     showBuilderSheet(prof); return;
   }
+  if (a === 'cw-wstep') { // nudge the weight — first tap off Auto seeds from the projected/estimated weight
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    const ex = EX_BY_ID[pe.exId];
+    const delta = +el.dataset.d, inc = (ex && ex.inc) || 2.5;
+    const base = pe.w != null ? +pe.w : (resolvePlanWeight(prof, pe).w || 0);
+    pe.w = U.clamp(U.round(base + delta * inc, roundStepFor(ex)), 0, 999);
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-wclear') { // back to Auto — progression drives the weight again
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    delete pe.w;
+    showBuilderSheet(prof); return;
+  }
   if (a === 'cw-reststep') {
     const pe = App.cwDraft.exercises[+el.dataset.i];
     const delta = +el.dataset.d;
@@ -7415,12 +7487,17 @@ function customAction(a, el, prof) {
     if (el.querySelector('input')) return;
     const i = +el.dataset.i, f = el.dataset.f, pe = App.cwDraft.exercises[i];
     if (!pe) return;
-    const cur = f === 'sets' ? String(pe.sets) : f === 'reps' ? `${pe.repsMin}-${pe.repsMax}` : String(pe.rest);
-    const hint = f === 'reps' ? '8-12' : f === 'rest' ? 'sec' : '';
+    const cur = f === 'sets' ? String(pe.sets) : f === 'reps' ? `${pe.repsMin}-${pe.repsMax}` : f === 'w' ? (pe.w != null ? String(pe.w) : '') : String(pe.rest);
+    const hint = f === 'reps' ? '8-12' : f === 'rest' ? 'sec' : f === 'w' ? 'auto' : '';
     el.innerHTML = `<input class="cwv-input" type="text" inputmode="${f === 'reps' ? 'text' : 'numeric'}" enterkeyhint="done" value="${U.esc(cur)}" placeholder="${hint}">`;
     const inp = el.querySelector('input'); inp.focus(); inp.select();
     const commit = () => {
       const raw = (inp.value || '').trim();
+      if (f === 'w') { // blank or "auto" → progression drives it; a number pins it
+        if (raw === '' || /auto/i.test(raw)) delete pe.w;
+        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n >= 0) pe.w = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId])), 0, 999); }
+        showBuilderSheet(prof); return;
+      }
       if (raw !== '') {
         if (f === 'sets') pe.sets = U.clamp(Math.round(parseFloat(raw)) || pe.sets, 1, 12);
         else if (f === 'rest') {

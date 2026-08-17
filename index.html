@@ -298,6 +298,11 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .pvl-f.hard { color: #C0302C; }
 .pvl-f.easy { color: #1B7F3B; }
 .pvl-dot { color: var(--ink3); opacity: .5; }
+.vslast-btn { font-size: 11.5px; font-weight: 800; color: var(--ink2); background: var(--fill); border-radius: 999px; padding: 5px 12px; letter-spacing: 0.01em; white-space: nowrap; }
+.vslast-btn.on { background: var(--ink); color: var(--on-ink); }
+.vslast { font-size: 11px; font-weight: 700; color: var(--ink3); margin: 1px 0 7px 22px; line-height: 1.45; }
+.vslast .vl-h { font-weight: 800; color: var(--violet); text-transform: uppercase; letter-spacing: 0.04em; font-size: 9.5px; margin-right: 5px; }
+.vslast.none { font-style: italic; opacity: 0.75; }
 .wo-head { position: sticky; top: 0; z-index: 12; background: var(--bg); padding-bottom: 10px; }
 .wo-topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 2px 8px; }
 .wo-topbar .t { font-weight: 900; font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -4014,6 +4019,36 @@ function lastPerformance(prof, exId) {
   return null;
 }
 
+/* last logged performance of an exercise, COACH-AWARE: the coach reads the
+   client's synced logs, the athlete her own. Returns the sets string + date +
+   how it felt — powers the "vs last week" comparison toggle (v3.19). */
+function lastPerfCompare(prof, exId) {
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const pg = isCoach ? (prof.coachOf.progress || {}) : null;
+  const logs = isCoach ? (pg.logs || []) : (prof.logs || []);
+  const units = isCoach ? (pg.units || prof.units) : prof.units;
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const e = (logs[i].entries || []).find(x => x.exId === exId);
+    if (e && e.sets && e.sets.length) {
+      const ex = EX_BY_ID[exId];
+      const parts = e.sets.map(s => (ex && (ex.timed || (ex.bw && !(s.w > 0)))) ? `${s.reps}${ex.timed ? 's' : ''}` : `${U.fmtW(s.w, units)}×${s.reps}`);
+      return { date: logs[i].date, str: parts.join(', '), feel: e.feel || null };
+    }
+  }
+  return null;
+}
+/* the compact last-time line shown under an exercise when the toggle is on */
+function vsLastLineHtml(prof, exId) {
+  const lp = lastPerfCompare(prof, exId);
+  if (!lp) return `<div class="vslast none">No history yet — this is the baseline</div>`;
+  const feelTxt = lp.feel === 'hard' ? ' · felt hard' : lp.feel === 'easy' ? ' · felt easy' : '';
+  return `<div class="vslast"><span class="vl-h">Last · ${U.fmtDateShort(lp.date)}</span>${U.esc(lp.str)}${feelTxt}</div>`;
+}
+/* the neat opt-in toggle button (off by default keeps the view uncluttered) */
+function vsLastToggleBtn(action) {
+  return `<button class="vslast-btn ${App.vsLast ? 'on' : ''}" data-a="${action}" title="Show last time's weights & reps for each exercise">${App.vsLast ? '✓ ' : ''}vs last week</button>`;
+}
+
 /* most-recent logged sets for an exercise — powers the "beat last time" strip */
 function lastSetsFor(prof, exId) {
   const logs = prof.logs || [];
@@ -4793,7 +4828,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.18.0';
+const APP_VERSION = '3.19.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5901,6 +5936,7 @@ function renderWorkout(prof) {
     ${w.coachNote ? `<div class="coach-note"><b>${U.esc(prof.coachName || 'Coach')}:</b> ${U.esc(w.coachNote)}</div>` : ''}
     ${w.readyNote ? `<div class="coach-note" style="border-color:#E7DEFF;background:#FBF9FF">${U.esc(w.readyNote)}</div>` : ''}
     ${warmupCardHtml(w)}
+    <div class="row" style="align-items:center;margin:2px 2px 10px"><span class="muted" style="font-size:12px;font-weight:700">${w.entries.length} ${U.plural(w.entries.length, 'exercise')}</span><span class="spacer"></span>${vsLastToggleBtn('vslast')}</div>
     ${w.entries.map((e, ei) => renderWorkoutEx(prof, e, ei)).join('')}
     <button class="btn ghost block" data-a="wo-add-ex">+ Add an exercise</button>
     ${cooldownCardHtml(w)}
@@ -5919,7 +5955,7 @@ function renderWorkoutEx(prof, e, ei) {
     `${plan.sets} sets × ${plan.repsMin}–${plan.repsMax} reps${ex.unilateral ? ' each side' : ''}`;
   const hint = e.isNew && !ex.bw ? `<div class="wo-target" style="color:#C2400C">First time — pick a weight that leaves ~2 reps in the tank</div>` : '';
   const lastP = lastPerformance(prof, ex.id);
-  const lastLine = lastP ? `<div class="wo-last">Last time: ${U.esc(lastP.str)} · ${U.fmtDateShort(lastP.date)}</div>` : '';
+  const lastLine = (App.vsLast && lastP) ? `<div class="wo-last">Last time: ${U.esc(lastP.str)} · ${U.fmtDateShort(lastP.date)}</div>` : '';
   const topW = Math.max(...e.sets.map(x => x.w || 0), 0);
   const plates = ex.equip.includes('barbell') && !ex.bw && topW > (prof.barKg || 20) ? plateBreakdown(topW, prof.barKg || 20) : null;
   const plateLine = plates ? `<div class="wo-plates">${prof.barKg || 20}kg bar + <b>${plates.perSide}</b>/side (${plates.plates.join(' + ')})${plates.exact ? '' : ' ≈'}</div>` : '';
@@ -6658,6 +6694,7 @@ function renderPlanView(prof) {
       <div class="nextweek-head" style="border-top:0;padding-top:6px;margin-top:10px"><span>Next week</span><span class="nextweek-sub">tap a day to edit</span></div>
       ${nextWeekStripHtml(prof)}
     </div>` : ''}
+    <div class="row" style="align-items:center;margin:4px 2px 10px"><span class="muted" style="font-size:12.5px;font-weight:700">${coachOf ? U.esc(coachOf.athleteName) + '’s workouts' : 'Your workouts'}</span><span class="spacer"></span>${vsLastToggleBtn('vslast')}</div>
     ${plan.days.map((d, i) => `
       <div class="card day-card">
         <div class="day-head">
@@ -6675,7 +6712,7 @@ function renderPlanView(prof) {
           return `<button class="plan-ex" style="width:100%;text-align:left" data-a="ex-open" data-ex="${ex.id}">
             <span class="dot"></span>${U.esc(ex.name)}
             <span class="sr">${pe.sets}×${pe.repsMin}–${pe.repsMax}${pe.timed ? 's' : ''}${wd}</span>
-          </button>`;
+          </button>${App.vsLast ? vsLastLineHtml(prof, pe.exId) : ''}`;
         }).join('')}
         </div>
       </div>`).join('')}
@@ -7029,6 +7066,7 @@ function dispatch(e) {
     return;
   }
   if (a === 'start-workout') { closeSheet(); guardPausedThen(prof, () => { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); }); return; }
+  if (a === 'vslast') { App.vsLast = !App.vsLast; render(); return; }   // v3.19 compare-vs-last-week toggle (render keeps scroll)
   // custom workout actions
   if (a.startsWith('cw-') || a === 'start-custom' || a === 'plan-edit-day' || a === 'nextweek-edit' || a === 'nextweek-revert' || a.startsWith('day-override')) return customAction(a, el, prof);
   // workout actions
@@ -7308,6 +7346,7 @@ function showBuilderSheet(prof) {
         <button class="wstep" data-a="cw-wstep" data-i="${i}" data-d="1">+</button>
         ${pe.w != null ? `<button class="cwx-auto" data-a="cw-wclear" data-i="${i}">↺ Auto</button>` : `<span class="cwx-hint">progression sets it</span>`}</div>` : ''}
       ${prof.isCoach ? `<input class="cwx-note" data-i="${i}" placeholder="Note for this exercise — e.g. slow 3s down" maxlength="200" value="${U.esc(pe.note || '')}">` : ''}
+      ${App.vsLast ? vsLastLineHtml(prof, pe.exId) : ''}
     </div>`;
   }).join('');
   showSheet(`
@@ -7324,7 +7363,8 @@ function showBuilderSheet(prof) {
     </div>` : ''}
     <input class="ob-input" id="cw-name" placeholder="Name it — e.g. Glute Day" value="${U.esc(d.name)}" maxlength="26" autocomplete="off">
     ${prof.isCoach ? `<textarea class="ob-input" id="cw-daynote" rows="2" maxlength="300" placeholder="Note for the whole day — shows when they start it" style="width:100%;margin-top:8px;resize:vertical;font-size:13.5px">${U.esc(d.note || '')}</textarea>` : ''}
-    <div class="mt12" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e"></div>Add your first exercise below.</div>'}</div>
+    ${d.exercises.length ? `<div class="row" style="align-items:center;margin:12px 2px 0"><span class="muted" style="font-size:12px;font-weight:700">Exercises</span><span class="spacer"></span>${vsLastToggleBtn('cw-vslast')}</div>` : ''}
+    <div class="mt8" id="cw-list">${rows || '<div class="empty" style="padding:18px"><div class="e"></div>Add your first exercise below.</div>'}</div>
     <button class="btn ghost block mt8" data-a="cw-add-ex">+ Add exercise</button>
     <div class="row mt16">
       ${d.id ? '<button class="btn danger" data-a="cw-delete">Delete</button>' : ''}
@@ -7437,6 +7477,7 @@ function customAction(a, el, prof) {
   }
   if (a === 'cw-add-ex') { showCwPickSheet(prof); return; }
   if (a === 'cw-scope') { App.cwDraft.scope = el.dataset.v === 'nextweek' ? 'nextweek' : 'plan'; showBuilderSheet(prof); return; }
+  if (a === 'cw-vslast') { App.vsLast = !App.vsLast; showBuilderSheet(prof); return; }   // v3.19 compare-vs-last-week in the editor
   if (a === 'cw-pick') {
     const ex = EX_BY_ID[el.dataset.ex];
     App.cwDraft.exercises.push(cwDefaultEntry(prof, ex));

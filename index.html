@@ -298,6 +298,23 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .pvl-f.hard { color: #C0302C; }
 .pvl-f.easy { color: #1B7F3B; }
 .pvl-dot { color: var(--ink3); opacity: .5; }
+/* v3.20 — coach exception dashboard */
+.triage .tag.hot { background: #FDECEA; color: #B3261E; }
+.triage .tag.ok { background: #E7F6E7; color: #1B7F3B; }
+[data-theme="dark"] .triage .tag.hot { background: rgba(224,110,100,0.16); color: #E8A9A2; }
+[data-theme="dark"] .triage .tag.ok { background: rgba(94,168,120,0.16); color: #9FD3B0; }
+.sig { display: flex; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); }
+.sig:first-child { border-top: 0; padding-top: 4px; }
+.sig-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 6px; background: var(--ink3); }
+.sig-dot.sev3 { background: #C0302C; }
+.sig-dot.sev2 { background: #C98A18; }
+.sig-dot.sev1 { background: #1B7F3B; }
+.sig-tx { flex: 1; min-width: 0; }
+.sig-t { font-weight: 800; font-size: 14px; line-height: 1.3; }
+.sig-d { font-size: 12.5px; color: var(--ink2); line-height: 1.5; margin-top: 3px; }
+.sig-act { font-size: 12px; font-weight: 800; color: var(--violet); margin-top: 7px; padding: 0; }
+.sig-act:active { opacity: .55; }
+.sig-good-head { font-size: 10px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 2px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .vslast-btn { font-size: 11.5px; font-weight: 800; color: var(--ink2); background: var(--fill); border-radius: 999px; padding: 5px 12px; letter-spacing: 0.01em; white-space: nowrap; }
 .vslast-btn.on { background: var(--ink); color: var(--on-ink); }
 .vslast { font-size: 11px; font-weight: 700; color: var(--ink3); margin: 1px 0 7px 22px; line-height: 1.45; }
@@ -4828,7 +4845,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.19.0';
+const APP_VERSION = '3.20.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -8018,6 +8035,192 @@ function v2Action(a, el, prof) {
 'use strict';
 
 /* ---------- coach home (replaces Today in a coach workspace) ---------- */
+/* ============================================================
+   v3.20 — EXCEPTION DASHBOARD (coach triage)
+   A coach's scarcest resource is attention. Instead of a roster of
+   identical cards, surface only what actually needs them today.
+   computeSignals() is PURE and takes ONE athlete's synced progress doc,
+   so mapping it across a roster later needs no rewrite.
+   NB: the coach never receives exState (ups/fails/history) — only logs —
+   so every trend below is derived from the logs themselves.
+============================================================ */
+const isoDaysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const daysBetweenISO = (a, b) => Math.round((U.parseISO(b) - U.parseISO(a)) / 86400000);
+
+/* per-exercise time series: one point per logged session, best set by e1RM */
+function coachExSeries(pg) {
+  const map = {};
+  for (const l of (pg.logs || [])) {
+    for (const e of (l.entries || [])) {
+      const sets = (e.sets || []).filter(s => (s.reps || 0) > 0);
+      if (!sets.length) continue;
+      const best = sets.reduce((a, s) => e1rm(s.w || 0, s.reps) > e1rm(a.w || 0, a.reps) ? s : a, sets[0]);
+      (map[e.exId] = map[e.exId] || []).push({
+        date: l.date, topW: Math.max(...sets.map(s => s.w || 0)),
+        e1: e1rm(best.w || 0, best.reps), reps: best.reps, feel: e.feel || null,
+        targetW: (e.targetW != null ? +e.targetW : null), coachSet: !!e.coachSet,
+      });
+    }
+  }
+  for (const k of Object.keys(map)) map[k].sort((a, b) => a.date < b.date ? -1 : 1);
+  return map;
+}
+
+/* → [{kind, sev, mag, title, detail, act, actLabel}] ranked most-urgent first.
+   sev 3 = needs you · 2 = worth a look · 1 = good news worth saying out loud */
+function computeSignals(pg, co) {
+  const out = [];
+  if (!pg) return out;
+  const today = U.todayISO();
+  const u = pg.units || 'kg';
+  const name = pg.name || 'They';
+  const logs = pg.logs || [];
+  const series = coachExSeries(pg);
+  const exName = id => U.esc((EX_BY_ID[id] || {}).name || id);
+  const wFmt = w => U.fmtW(w, u) + U.unitLabel(u);
+  const list = (arr, n) => arr.slice(0, n).map(x => exName(x.id)).join(', ') + (arr.length > n ? ` +${arr.length - n} more` : '');
+
+  /* --- gone quiet: silence measured against THEIR planned lift days ---
+     take the newest by date rather than the last element: synced logs are
+     normally chronological, but a merge or re-import must not fake a gap. */
+  const last = logs.reduce((a, l) => (!a || l.date > a.date) ? l : a, null);
+  if (!last) {
+    out.push({ kind: 'quiet', sev: 3, mag: 999, title: `${U.esc(name)} hasn’t logged anything yet`,
+      detail: 'No sessions have come through. Worth checking they’ve applied your plan and can find the Start button.',
+      act: 'co-focus-msg', actLabel: 'Check in' });
+  } else {
+    const gap = daysBetweenISO(last.date, today);
+    const sched = (pg.quiz && pg.quiz.weekSchedule) || {};
+    let missed = 0;
+    for (let i = 1; i <= gap; i++) {
+      const d = U.parseISO(last.date); d.setDate(d.getDate() + i);
+      if (sched[(d.getDay() + 6) % 7] === 'lift') missed++;
+    }
+    if (missed >= 2 || gap >= 7) {
+      out.push({ kind: 'quiet', sev: 3, mag: missed * 10 + gap,
+        title: `${U.esc(name)} has gone quiet`,
+        detail: `Last session ${U.fmtDateShort(last.date)}, ${gap} ${U.plural(gap, 'day')} ago${missed ? ` — ${missed} planned ${U.plural(missed, 'session')} missed since` : ''}.`,
+        act: 'co-focus-msg', actLabel: 'Check in' });
+    }
+  }
+
+  /* --- finding it hard: clustered 'hard' ratings in the last 10 days --- */
+  const cut10 = isoDaysAgo(10);
+  const hard = [];
+  for (const l of logs) if (l.date >= cut10) for (const e of (l.entries || [])) if (e.feel === 'hard') hard.push(e.exId);
+  if (hard.length >= 4) {
+    const freq = {}; hard.forEach(id => freq[id] = (freq[id] || 0) + 1);
+    const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([id]) => ({ id }));
+    out.push({ kind: 'hard', sev: 3, mag: hard.length,
+      title: `${U.esc(name)} is finding it hard`,
+      detail: `${hard.length} lifts rated hard in the last 10 days — mostly ${list(top, 2)}. Could be load, could be life.`,
+      act: 'co-focus-msg', actLabel: 'Ask how they’re doing' });
+  }
+
+  /* --- quietly dropping the weight: lifting under what you prescribed --- */
+  const cut14 = isoDaysAgo(14);
+  const under = [];
+  for (const [id, s] of Object.entries(series)) {
+    const low = s.filter(p => p.date >= cut14 && p.targetW > 0 && p.topW > 0 && p.topW < p.targetW * 0.9);
+    if (low.length >= 2) under.push({ id, n: low.length, p: low[low.length - 1] });
+  }
+  if (under.length) {
+    under.sort((a, b) => b.n - a.n);
+    const w = under[0].p;
+    out.push({ kind: 'under', sev: 3, mag: under.reduce((t, x) => t + x.n, 0),
+      title: `Training under the prescription`,
+      detail: `${list(under, 2)} — last time ${wFmt(w.topW)} against your ${wFmt(w.targetW)}. Either the target is too high or something’s off.`,
+      act: 'tab-plan', actLabel: 'Adjust their plan' });
+  }
+
+  /* --- stalled: three sessions of a lift with no meaningful e1RM gain --- */
+  const stalled = [];
+  for (const [id, s] of Object.entries(series)) {
+    if (s.length < 3) continue;
+    const r = s.slice(-3);
+    if (daysBetweenISO(r[0].date, r[2].date) < 10) continue;   // 3 sessions in one week isn't a stall
+    if (r[2].e1 <= r[0].e1 * 1.005) stalled.push({ id, since: r[0].date, w: r[2].topW });
+  }
+  if (stalled.length) {
+    stalled.sort((a, b) => a.since < b.since ? -1 : 1);
+    out.push({ kind: 'stalled', sev: 2, mag: stalled.length,
+      title: `${stalled.length === 1 ? 'A lift has' : `${stalled.length} lifts have`} stalled`,
+      detail: `${list(stalled, 3)} — no gain over the last three sessions${stalled[0].w ? `, sitting at ${wFmt(stalled[0].w)}` : ''}. Time for a variation, a rep-range change, or a back-off week.`,
+      act: 'tab-plan', actLabel: 'Adjust their plan' });
+  }
+
+  /* --- flying: e1RM climbing steadily — room to push --- */
+  const flying = [];
+  for (const [id, s] of Object.entries(series)) {
+    if (s.length < 3) continue;
+    const r = s.slice(-3);
+    if (r[2].e1 > r[0].e1 * 1.04 && r[1].e1 >= r[0].e1 && r[2].feel !== 'hard') flying.push({ id, w: r[2].topW });
+  }
+  if (flying.length) {
+    out.push({ kind: 'flying', sev: 1, mag: flying.length,
+      title: `Room to push`,
+      detail: `${list(flying, 3)} climbing steadily and not rated hard. ${U.esc(name)} could take more here.`,
+      act: 'tab-plan', actLabel: 'Raise the targets' });
+  }
+
+  /* --- new bests worth saying out loud --- */
+  const prs = Object.entries(pg.prs || {}).filter(([, p]) => p && p.date && p.date >= cut10);
+  if (prs.length) {
+    prs.sort((a, b) => a[1].date < b[1].date ? 1 : -1);
+    out.push({ kind: 'pr', sev: 1, mag: prs.length,
+      title: `${prs.length} new best${prs.length > 1 ? 's' : ''} in the last 10 days`,
+      detail: prs.slice(0, 3).map(([id, p]) => `${exName(id)} ${wFmt(p.w)}`).join(' · '),
+      act: 'co-draft', actLabel: 'Say well done',
+      draft: `${name} — ${exName(prs[0][0])} at ${wFmt(prs[0][1].w)} is a new best. That's the work showing up. Proud of you.` });
+  }
+
+  /* --- your latest plan hasn't landed --- */
+  if (co && co.lastPlanRev && (pg.appliedPlanRev || 0) < co.lastPlanRev) {
+    out.push({ kind: 'unapplied', sev: 2, mag: 1,
+      title: `Your latest plan hasn’t been applied`,
+      detail: `${U.esc(name)} is still training the previous version — they need to tap Apply on their phone.`,
+      act: 'co-focus-msg', actLabel: 'Nudge them' });
+  }
+
+  return out.sort((a, b) => b.sev - a.sev || b.mag - a.mag);
+}
+
+function signalRowHtml(s) {
+  const act = s.act === 'tab-plan'
+    ? `<button class="sig-act" data-a="tab" data-id="plan">${U.esc(s.actLabel)} ›</button>`
+    : s.act === 'co-draft'
+      ? `<button class="sig-act" data-a="co-draft" data-t="${U.esc(s.draft || '')}">${U.esc(s.actLabel)} ›</button>`
+      : `<button class="sig-act" data-a="co-focus-msg">${U.esc(s.actLabel)} ›</button>`;
+  return `<div class="sig sig-${s.kind}">
+    <span class="sig-dot sev${s.sev}"></span>
+    <div class="sig-tx"><div class="sig-t">${s.title}</div><div class="sig-d">${s.detail}</div>${act}</div>
+  </div>`;
+}
+
+/* the triage card — the point of the coach's home screen */
+function coachTriageHtml(prof) {
+  const co = prof.coachOf, pg = co.progress;
+  const sigs = computeSignals(pg, co);
+  const needs = sigs.filter(s => s.sev >= 2);
+  const good = sigs.filter(s => s.sev === 1);
+  const nm = U.esc((pg && pg.name) || co.athleteName || 'They');
+  if (!sigs.length) {
+    return `<div class="card triage">
+      <div class="row"><h3>Needs you</h3><span class="spacer"></span><span class="tag ok">all clear</span></div>
+      <p class="muted mt8" style="font-size:13px;line-height:1.5">Nothing needs your attention today. ${nm} is training to plan and progressing — the best thing you can do is leave it alone.</p>
+    </div>`;
+  }
+  return `<div class="card triage">
+    <div class="row"><h3>Needs you</h3><span class="spacer"></span>
+      <span class="tag ${needs.length ? 'hot' : 'ok'}">${needs.length ? needs.length + ' to look at' : 'all clear'}</span></div>
+    ${needs.length
+      ? `<div class="mt8">${needs.map(signalRowHtml).join('')}</div>`
+      : `<p class="muted mt8" style="font-size:13px;line-height:1.5">Nothing needs fixing today — ${nm} is training to plan.</p>`}
+    ${good.length ? `<div class="sig-good-head">Worth saying out loud</div>${good.map(signalRowHtml).join('')}` : ''}
+  </div>`;
+}
+
 function renderCoachHome(prof) {
   const co = prof.coachOf;
   const pg = co.progress;
@@ -8054,6 +8257,7 @@ function renderCoachHome(prof) {
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
     ${(() => { const pgp = pg && pg.program; const p = pgp && typeof pgp.n === 'number' ? pgp : prof.program;
       return p ? `<div style="margin-bottom:12px"><span class="prog-chip">${U.esc(programLabelFrom(p))}</span></div>` : ''; })()}
+    ${coachTriageHtml(prof)}
     <div class="card hero">
       <div class="kicker">THEIR PLAN</div>
       <h2 style="margin-top:4px">${U.esc(planState)}</h2>
@@ -8296,6 +8500,22 @@ function coachAction(a, el, prof) {
     App.data.activeProfileId = el.dataset.id;
     App.view = 'today'; closeSheet(); saveApp(); render();
     syncTick(true);
+    return true;
+  }
+  if (a === 'co-focus-msg') {   // triage → jump to the message box
+    const t = document.getElementById('co-msg');
+    if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => t.focus(), 320); }
+    return true;
+  }
+  if (a === 'co-draft') {   // triage → prefill a suggested opener (not sent)
+    const t = document.getElementById('co-msg');
+    if (t) {
+      t.value = el.dataset.t || '';
+      prof.coachMsg = t.value;
+      t.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }, 320);
+      toast('Draft ready — edit it, then send');
+    }
     return true;
   }
   if (a === 'co-myprofile') {

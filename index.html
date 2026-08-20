@@ -312,10 +312,95 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .sig-tx { flex: 1; min-width: 0; }
 .sig-t { font-weight: 800; font-size: 14px; line-height: 1.3; }
 .sig-d { font-size: 12.5px; color: var(--ink2); line-height: 1.5; margin-top: 3px; }
-.sig-act { font-size: 12px; font-weight: 800; color: var(--violet); margin-top: 7px; padding: 0; }
+.sig-act { display: inline-flex; align-items: center; min-height: 34px; font-size: 12px; font-weight: 800; color: var(--violet); margin-top: 2px; margin-left: -3px; padding: 0 3px; }
 .sig-act:active { opacity: .55; }
 .sig-good-head { font-size: 10px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 2px; padding-top: 12px; border-top: 1px dashed var(--line); }
-.vslast-btn { font-size: 11.5px; font-weight: 800; color: var(--ink2); background: var(--fill); border-radius: 999px; padding: 5px 12px; letter-spacing: 0.01em; white-space: nowrap; }
+/* v3.22 — weeks timeline */
+.plan-seg { margin: 0 0 14px; }
+.wk { display: block; width: 100%; text-align: left; }
+.wk-head { display: flex; align-items: baseline; gap: 8px; }
+.wk-kick { font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink3); }
+.wk-range { font-size: 12px; font-weight: 700; color: var(--ink3); margin-left: auto; }
+.wk-prov { display: inline-block; font-size: 11.5px; font-weight: 800; border-radius: 8px; padding: 4px 9px; margin-top: 8px; background: var(--fill); color: var(--ink2); }
+.wk-prov.t-coach { background: var(--coach-bg); color: var(--violet); }
+.wk-prov.t-you { background: #FDF3E0; color: #96650C; }
+.wk-prov.t-mixed { background: #FDF3E0; color: #96650C; }
+[data-theme="dark"] .wk-prov.t-you, [data-theme="dark"] .wk-prov.t-mixed { background: rgba(201,138,24,0.18); color: #E3BE7A; }
+.wk-body { font-size: 13.5px; line-height: 1.5; margin-top: 8px; }
+.wk-go { display: inline-flex; align-items: center; min-height: 30px; font-size: 12px; font-weight: 800; color: var(--violet); margin-top: 4px; }
+.wk-bar { height: 6px; border-radius: 99px; background: var(--fill); margin-top: 9px; overflow: hidden; }
+.wk-bar i { display: block; height: 100%; background: var(--ink); border-radius: 99px; }
+.wk-sec { font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink3); margin: 18px 2px 8px; }
+.wk-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 11px 0; border-top: 1px solid var(--line); background: none; }
+.wk-row:first-child { border-top: 0; }
+.wk-row:active { opacity: .6; }
+.wk-row-tx { flex: 1; min-width: 0; }
+.wk-row-n { display: block; font-weight: 800; font-size: 14px; }
+.wk-row-m { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+.wk-row-b { flex: none; font-size: 11.5px; font-weight: 800; border-radius: 8px; padding: 4px 9px; background: var(--fill); color: var(--ink3); }
+.wk-row-b.full { background: #E7F6E7; color: #1B7F3B; }
+.wk-row-b.part { background: #FDF3E0; color: #96650C; }
+[data-theme="dark"] .wk-row-b.full { background: rgba(94,168,120,0.18); color: #9FD3B0; }
+[data-theme="dark"] .wk-row-b.part { background: rgba(201,138,24,0.18); color: #E3BE7A; }
+.wk-day { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 10px 0; border-top: 1px solid var(--line); background: none; }
+.wk-day:first-child { border-top: 0; }
+.wk-day.miss { opacity: .5; }
+.wk-day-d { flex: none; width: 34px; font-size: 11px; font-weight: 800; color: var(--ink3); text-transform: uppercase; }
+.wk-day-tx { flex: 1; min-width: 0; }
+.wk-day-tx .nm { display: block; font-weight: 700; font-size: 13.5px; }
+.wk-day-tx .mt { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+.wk-day-go { flex: none; color: var(--ink3); font-weight: 800; }
+.wk-day.done .wk-day-go { color: #1B7F3B; }
+.nextweek-link { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); background: none; }
+.nextweek-link:active { opacity: .6; }
+.nwl-tx { flex: 1; min-width: 0; }
+.nwl-h { display: block; font-weight: 800; font-size: 13.5px; }
+.nwl-s { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+.nwl-go { color: var(--ink3); font-weight: 800; font-size: 16px; }
+/* v3.22 — coach-mode identity bar */
+.coachbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 7px;
+  background: var(--violet); color: var(--on-ink); padding: 9px 16px; margin: 0 -16px 12px;
+  font-size: 12.5px; font-weight: 800; letter-spacing: 0.01em; }
+.coachbar .cb-pip { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .85; flex: none; }
+.coachbar .cb-lb { text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.1em; opacity: .8; }
+.coachbar .cb-who { font-weight: 900; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.coachbar .cb-sw { display: inline-flex; align-items: center; min-height: 30px; color: currentColor; font-weight: 800; font-size: 12px; background: rgba(255,255,255,0.18); border-radius: 999px; padding: 0 13px; flex: none; }
+.coachbar .cb-sw:active { opacity: .6; }
+body.coach-mode .tabs button.on { color: var(--violet); }
+body.coach-mode .tabs button.on svg { stroke: var(--violet); }
+/* v3.21 — coach rails */
+.cwx-rails { margin-top: 8px; background: var(--coach-bg); border-radius: 10px; padding: 8px 10px; }
+.cwx-rails .lb { font-size: 9.5px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.4px; }
+.rail-seg { margin-top: 5px; }
+.rail-seg button { font-size: 12px; font-weight: 800; padding: 6px 4px; }
+.rail-cap { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.rail-cap .wstep { font-size: 16px; font-weight: 800; color: var(--ink2); padding: 0 6px; }
+.rail-cap b.cwv { font-size: 12.5px; min-width: 46px; text-align: center; white-space: nowrap; cursor: text; border-bottom: 1.5px dashed rgba(20,22,34,0.28); padding-bottom: 1px; }
+.rail-cap b.cwv.auto { color: var(--ink3); }
+.rail-cap .cwx-auto { margin-left: auto; font-size: 11px; font-weight: 800; color: var(--violet); padding: 3px 8px; }
+.rail-hint { font-size: 10.5px; line-height: 1.45; color: var(--ink3); margin-top: 7px; }
+/* v3.21 — "why this session" */
+.wo-why { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; line-height: 1.45; color: var(--ink2); margin-top: 5px; }
+.wo-why-q { flex: none; font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--violet); background: var(--coach-bg); border-radius: 5px; padding: 2px 5px; position: relative; top: -1px; }
+/* v3.21 — roster */
+.rost { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 10px 0; border-top: 1px solid var(--line); background: none; }
+.rost:first-child { border-top: 0; }
+.rost:active { opacity: .6; }
+.rost-av { width: 38px; height: 38px; border-radius: 12px; flex: none; display: grid; place-items: center; font-weight: 900; font-size: 13px; letter-spacing: -0.02em; background: var(--fill); color: var(--ink2); }
+.rost-av.a3 { background: #FDECEA; color: #B3261E; }
+.rost-av.a2 { background: #FDF3E0; color: #96650C; }
+.rost-av.a1 { background: #E7F6E7; color: #1B7F3B; }
+[data-theme="dark"] .rost-av.a3 { background: rgba(224,110,100,0.18); color: #E8A9A2; }
+[data-theme="dark"] .rost-av.a2 { background: rgba(201,138,24,0.18); color: #E3BE7A; }
+[data-theme="dark"] .rost-av.a1 { background: rgba(94,168,120,0.18); color: #9FD3B0; }
+.rost-tx { flex: 1; min-width: 0; }
+.rost-n { display: block; font-weight: 800; font-size: 14.5px; }
+.rost-m { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+.rost-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.rost-dot.sev3 { background: #C0302C; }
+.rost-dot.sev2 { background: #C98A18; }
+.rost-ok { color: #1B7F3B; font-weight: 900; font-size: 15px; }
+.vslast-btn { display: inline-flex; align-items: center; min-height: 32px; font-size: 11.5px; font-weight: 800; color: var(--ink2); background: var(--fill); border-radius: 999px; padding: 0 13px; letter-spacing: 0.01em; white-space: nowrap; }
 .vslast-btn.on { background: var(--ink); color: var(--on-ink); }
 .vslast { font-size: 11px; font-weight: 700; color: var(--ink3); margin: 1px 0 7px 22px; line-height: 1.45; }
 .vslast .vl-h { font-weight: 800; color: var(--violet); text-transform: uppercase; letter-spacing: 0.04em; font-size: 9.5px; margin-right: 5px; }
@@ -667,7 +752,7 @@ a.vid-retry { text-decoration: none; display: inline-block; }
   padding: 8px 11px; font-size: 12.5px; font-family: inherit; background: var(--coach-bg); }
 .cwx-note:focus { outline: none; border-color: #B9A5F0; }
 .switchback { display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
-  color: var(--ink3); font-weight: 800; font-size: 12.5px; padding: 0 0 10px; }
+  color: var(--ink3); font-weight: 800; font-size: 12.5px; padding: 0 0 10px; min-height: 36px; display: flex; align-items: center; }
 .switchback:active { opacity: 0.6; }
 /* ============ v2.3 — history editing ============ */
 .hist-sets { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
@@ -3228,7 +3313,9 @@ function nextTargets(profile, planEx) {
   const ex = EX_BY_ID[planEx.exId];
   const st = exState(profile, planEx.exId);
   const reps = st.repTarget != null ? Math.min(Math.max(st.repTarget, planEx.repsMin), planEx.repsMax) : planEx.repsMin + (ex.bw ? 2 : 0);
-  return { w: st.w, reps, sets: planEx.sets, isNew: st.w == null && !ex.bw && !ex.timed };
+  let w = st.w;   // v3.21 — a coach ceiling clamps what we ever show or prescribe
+  if (w != null && planEx.cap != null && isFinite(+planEx.cap)) w = Math.min(w, +planEx.cap);
+  return { w, reps, sets: planEx.sets, isNew: st.w == null && !ex.bw && !ex.timed };
 }
 
 /* A conservative STARTING-weight estimate for a weighted move she hasn't logged
@@ -3302,6 +3389,7 @@ function applyProgression(profile, log) {
     if (ex.timed) { // seconds-based: nudge up 5s until top, then hold
       const best = Math.max(...done.map(s => s.reps));
       st.repTarget = Math.min(best + 5, planEx.repsMax + 30);
+      st.why = { k: 'secs', to: st.repTarget };
       msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: aim for ${st.repTarget}s next time.` });
       continue;
     }
@@ -3309,6 +3397,7 @@ function applyProgression(profile, log) {
       const best = Math.max(...done.map(s => s.reps));
       if (best >= planEx.repsMax + 5) msgs.push({ exId: ex.id, kind: 'level', text: `${ex.name}: you’ve outgrown it — try a harder variation.` });
       st.repTarget = best + 1;
+      st.why = { k: 'reps', to: st.repTarget };
       msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: go for ${st.repTarget} reps next time.` });
       continue;
     }
@@ -3319,31 +3408,52 @@ function applyProgression(profile, log) {
       if (st.fails >= 2) {
         const newW = Math.max(0, U.round(st.w * 0.9, roundStepFor(ex)));
         msgs.push({ exId: ex.id, kind: 'deload', text: `${ex.name}: two tough sessions — dropping to ${newW}kg to rebuild momentum. You’ll be past ${st.w}kg again in no time.` });
+        st.why = { k: 'deload', from: st.w, to: newW };
         st.w = newW; st.fails = 0; st.repTarget = planEx.repsMin;
       } else {
+        st.why = { k: 'miss', to: st.w };
         msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: staying at ${st.w}kg — nail ${planEx.sets}×${planEx.repsMin} next time.` });
         st.repTarget = planEx.repsMin;
       }
       continue;
     }
+    const rail = planEx.prog || 'auto';                       // v3.21 coach rails
+    const capW = (planEx.cap != null && isFinite(+planEx.cap)) ? +planEx.cap : null;
+    const capped = v => capW != null ? Math.min(v, capW) : v;
+    if (rail === 'hold') {                                   // coach: weight stays put, reps may climb
+      st.repTarget = Math.min(Math.max(...done.map(s => s.reps)) + 1, planEx.repsMax);
+      st.fails = 0;
+      st.why = { k: 'coachhold', to: st.w };
+      msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: your coach is holding ${st.w}kg — chase the reps.` });
+      continue;
+    }
     if (mode === 'linear') {
-      if (!hard || st.ups === 0) {
-        st.w = U.round((st.w || topW) + ex.inc, 0.5); st.ups++; st.fails = 0; st.repTarget = planEx.repsMin;
+      if (!hard || st.ups === 0 || rail === 'push') {
+        const _from = st.w;
+        st.w = capped(U.round((st.w || topW) + ex.inc, 0.5)); st.ups++; st.fails = 0; st.repTarget = planEx.repsMin;
+        st.why = st.w === _from ? { k: 'atcap', to: st.w } : { k: 'up', from: _from, to: st.w };
         msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: moving up to ${st.w}kg next session.` });
       } else {
+        st.why = { k: 'hardhold', to: st.w };
         msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: holding ${st.w}kg to consolidate.` });
       }
     } else { // double progression — bump the WEIGHT once she completes all sets in range (not only at the very top)
       const fullSets = done.length >= (entry.plan ? entry.plan.sets : done.length);
-      if (fullSets && !hard) {
-        st.w = U.round((st.w || topW) + ex.inc, 0.5); st.repTarget = planEx.repsMin; st.ups++; st.fails = 0;
+      if (fullSets && (!hard || rail === 'push')) {
+        const _from = st.w;
+        st.w = capped(U.round((st.w || topW) + ex.inc, 0.5)); st.repTarget = planEx.repsMin; st.ups++; st.fails = 0;
+        st.why = st.w === _from ? { k: 'atcap', to: st.w }
+          : (hard && rail === 'push') ? { k: 'pushup', from: _from, to: st.w }
+          : { k: 'up', from: _from, to: st.w };
         msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: all sets in range — weight goes up to ${st.w}kg next time!` });
       } else if (fullSets && hard) {
         st.repTarget = allTop ? planEx.repsMax : Math.min(Math.max(...done.map(s => s.reps)) + 1, planEx.repsMax);
+        st.why = { k: 'hardhold', to: st.w };
         msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: tough one — repeat ${st.w}kg, then it climbs.` });
       } else {
         const minDone = Math.min(...done.map(s => s.reps));
         st.repTarget = Math.min(Math.max(minDone, planEx.repsMin) + 1, planEx.repsMax);
+        st.why = { k: 'finish', to: st.w, sets: planEx.sets };
         msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: finish all ${planEx.sets} sets to move up — ${st.w}kg again next time.` });
       }
     }
@@ -4406,6 +4516,8 @@ function packPe(pe) {
   if (pe.ssWithNext) o.ssWithNext = true;
   if (pe.note) o.note = String(pe.note).slice(0, 200);
   if (pe.w != null && isFinite(+pe.w)) o.w = +pe.w;   // coach-pinned weight
+  if (pe.prog === 'push' || pe.prog === 'hold') o.prog = pe.prog;   // coach rail
+  if (pe.cap != null && isFinite(+pe.cap) && +pe.cap > 0) o.cap = +pe.cap;
   return o;
 }
 function sanitizePe(pe) {
@@ -4423,6 +4535,8 @@ function sanitizePe(pe) {
     slotType: typeof pe.slotType === 'string' ? pe.slotType.slice(0, 12) : 'acc',
     ssWithNext: !!pe.ssWithNext,
     w: (pe.w != null && isFinite(+pe.w) && +pe.w > 0) ? U.clamp(+pe.w, 0, 999) : undefined,
+    prog: (pe.prog === 'push' || pe.prog === 'hold') ? pe.prog : undefined,
+    cap: (pe.cap != null && isFinite(+pe.cap) && +pe.cap > 0) ? U.clamp(+pe.cap, 0, 999) : undefined,
     note: pe.note ? String(pe.note).slice(0, 200) : undefined,
   };
 }
@@ -4436,7 +4550,7 @@ function packWeekPlan(prof) { // per-week overrides the coach set (current+futur
     const od = {};
     for (const [idx, ov] of Object.entries(days)) {
       if (!ov || !Array.isArray(ov.exercises) || !ov.exercises.length) continue;
-      od[idx] = { name: (ov.name || '').slice(0, 40), note: ov.note ? String(ov.note).slice(0, 300) : '', exercises: ov.exercises.map(packPe) };
+      od[idx] = { name: (ov.name || '').slice(0, 40), note: ov.note ? String(ov.note).slice(0, 300) : '', exercises: ov.exercises.map(packPe), at: ov.at || U.todayISO() };
     }
     if (Object.keys(od).length) out[wk] = od;
   }
@@ -4450,7 +4564,7 @@ function unpackWeekPlan(raw) {
     const od = {};
     for (const [idx, ov] of Object.entries(days)) {
       const exs = ((ov && ov.exercises) || []).map(sanitizePe).filter(Boolean);
-      if (exs.length) od[idx] = { name: (ov && ov.name) || '', note: (ov && ov.note) || '', exercises: exs };
+      if (exs.length) od[idx] = { name: (ov && ov.name) || '', note: (ov && ov.note) || '', exercises: exs, by: 'coach', at: (ov && ov.at) || U.todayISO() };
     }
     if (Object.keys(od).length) out[wk] = od;
   }
@@ -4654,6 +4768,7 @@ async function syncTick(force) {
   try {
     for (const prof of Object.values(App.data.profiles)) {
       try {
+        if (prof.demo) continue;   // seeded demo athletes are local only — never hit the relay
         if (prof.isCoach && prof.coachOf) changed = (await coachSyncTick(prof, force)) || changed;
         else if (prof.coachSync) changed = (await athleteSyncTick(prof, force)) || changed;
       } catch (e) {
@@ -4845,7 +4960,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.20.0';
+const APP_VERSION = '3.22.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5050,6 +5165,35 @@ function nextPlanDay(prof) {
 }
 
 /* ---- workout lifecycle ---- */
+/* v3.21 — "why this session": one honest line explaining where today's number
+   came from. Reads the decision applyProgression actually recorded (st.why)
+   rather than guessing, and lets the reasons that override it speak first. */
+function whyFor(prof, pe, t, ctx) {
+  const ex = EX_BY_ID[pe.exId]; if (!ex) return '';
+  const u = prof.units;
+  const w = x => U.fmtW(x, u) + U.unitLabel(u);
+  const coachName = prof.coachSync ? (prof.coachSync.coachName || 'Your coach') : 'Your coach';
+  if (pe.w != null) return `${U.esc(coachName)} set this weight${pe.note ? '' : ' — hold it today'}`;
+  if (ctx.easy) return 'Easy week — lighter on purpose, so you come back stronger';
+  if (ctx.rm && ctx.rm.mod < 1) return `You checked in low today, so this is eased off${ctx.rm.label ? ' — ' + U.esc(ctx.rm.label) : ''}`;
+  if (ctx.rm && ctx.rm.mod > 1) return 'You checked in feeling good — nudged up a touch';
+  if (t.isNew) return 'First time on this one — pick a weight you could stop 2 reps short with';
+  const st = (prof.exState || {})[pe.exId] || {};
+  const y = st.why;
+  if (!y) return '';
+  if (y.k === 'up') return y.from ? `Up from ${w(y.from)} — you finished every set in range last time` : 'Moving up — you finished every set last time';
+  if (y.k === 'deload') return `Dropped from ${w(y.from)} after two tough sessions — rebuilding from here`;
+  if (y.k === 'miss') return 'Same weight again — the reps slipped last time';
+  if (y.k === 'hardhold') return 'Same weight — you rated it hard, so it holds until it feels easier';
+  if (y.k === 'finish') return `Same weight — finish all ${y.sets || pe.sets} sets in range and it goes up`;
+  if (y.k === 'coachhold') return `${U.esc(coachName)} is holding this weight — chase the reps instead`;
+  if (y.k === 'pushup') return y.from ? `Up from ${w(y.from)} — ${U.esc(coachName)} wants this one pushed` : `Pushed up — ${U.esc(coachName)}'s call`;
+  if (y.k === 'atcap') return `At the ceiling ${U.esc(coachName)} set — reps from here`;
+  if (y.k === 'reps') return `Going for ${y.to} reps — one more than last time`;
+  if (y.k === 'secs') return `Going for ${y.to}s — five more than last time`;
+  return '';
+}
+
 function buildEntries(prof, exercises) {
   const easy = deloadActive(prof);
   const rm = readinessToday(prof);
@@ -5064,7 +5208,8 @@ function buildEntries(prof, exercises) {
     const nSets = easy && t.sets ? t.sets : pe.sets;
     const sets = [];
     for (let i = 0; i < nSets; i++) sets.push({ w: t.w != null ? t.w : 0, reps: t.reps, done: false });
-    return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew, targetW: (t.w != null ? t.w : null), coachSet: pe.w != null };
+    return { exId: pe.exId, plan: pe, sets, feel: null, isNew: t.isNew, targetW: (t.w != null ? t.w : null),
+      coachSet: pe.w != null, why: whyFor(prof, pe, t, { easy, rm }) };
   });
 }
 function startWorkout(prof, dayIdx, trimMin) {
@@ -5211,6 +5356,7 @@ const ICONS = {
 
 /* ---------- master render ---------- */
 function render() {
+  if (App.planTab == null) { try { App.planTab = localStorage.getItem('liftoff.plantab') || 'weeks'; } catch (e) { App.planTab = 'weeks'; } }
   disposePlayers();
   if (_elapsedIv) { clearInterval(_elapsedIv); _elapsedIv = null; }
   const app = $app();
@@ -5236,12 +5382,16 @@ function render() {
   if (!prof || App.creating) { app.innerHTML = renderOnboarding(); bindOnboarding(); _restoreScroll(y); return; }
   if (woFull) { app.innerHTML = renderWorkout(prof); afterWorkoutRender(prof); _restoreScroll(y); return; }
   let html = '';
-  if (App.view === 'today') html = prof.isCoach ? renderCoachHome(prof) : renderToday(prof);
+  if (App.view === 'roster') html = renderCoachRoster(prof);
+  else if (App.view === 'today') html = prof.isCoach ? renderCoachHome(prof) : renderToday(prof);
   else if (App.view === 'plan') html = renderPlanView(prof);
   else if (App.view === 'library') html = renderLibrary(prof);
   else if (App.view === 'progress') html = prof.isCoach ? renderCoachProgress(prof) : renderProgress(prof);
   else html = renderProfileView(prof);
-  app.innerHTML = html + (woActive ? workoutResumeBarHtml(prof) : '') + renderTabs(prof);
+  // v3.22 — coaching is a MODE, and it must never be ambiguous which one you're in
+  const inCoach = !!(prof.isCoach && prof.coachOf) || App.view === 'roster';
+  document.body.classList.toggle('coach-mode', inCoach);
+  app.innerHTML = coachBarHtml(prof) + html + (woActive ? workoutResumeBarHtml(prof) : '') + renderTabs(prof);
   afterRender(prof);
   if (woActive) _miniElapsedTick(prof);              // keep the mini-bar clock live while browsing
   _restoreScroll(y);
@@ -5277,6 +5427,42 @@ function _miniElapsedTick(prof) {
 function _restoreScroll(y) {
   window.scrollTo(0, y);
   requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
+/* v3.22 — the persistent "which hat am I wearing" bar. Sticky, tinted, and the
+   single place to switch between your own training and any athlete you coach. */
+function coachBarHtml(prof) {
+  if (!prof) return '';
+  const onRoster = App.view === 'roster';
+  const co = prof.isCoach && prof.coachOf;
+  if (!co && !onRoster) return '';
+  const who = onRoster && !co ? `${coachClients().length} athletes` : U.esc(co.athleteName);
+  return `<div class="coachbar">
+    <span class="cb-pip"></span>
+    <span class="cb-lb">Coaching</span>
+    <span class="cb-who">${who}</span>
+    <span class="spacer"></span>
+    <button class="cb-sw" data-a="co-switch">Switch ▾</button>
+  </div>`;
+}
+
+/* one sheet that answers "where do I go now" — your training, the roster, or a client */
+function showSwitchSheet(prof) {
+  const clients = coachClients();
+  const mine = Object.values(App.data.profiles).find(p => !p.isCoach);
+  const curId = App.data.activeProfileId;
+  const row = (a, extra, title, meta, on) => `<button class="ex-row" style="width:100%;text-align:left" data-a="${a}" ${extra}>
+      <span style="flex:1;min-width:0"><div class="nm">${title}</div><div class="muted" style="font-size:11.5px">${meta}</div></span>
+      ${on ? '<span style="font-weight:900;color:var(--violet)">●</span>' : '<span class="go">›</span>'}</button>`;
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Switch view</h3>
+    <p class="muted mt8" style="margin-bottom:10px">You're currently ${prof.isCoach && prof.coachOf ? `coaching <b>${U.esc(prof.coachOf.athleteName)}</b>` : App.view === 'roster' ? 'on your coaching roster' : `training as <b>${U.esc(prof.name)}</b>`}.</p>
+    ${mine ? `<div class="mt8">${row('co-myprofile', '', `${U.esc(mine.name)} — my own training`, 'Your plan, your sessions', !prof.isCoach && App.view !== 'roster')}</div>` : ''}
+    ${clients.length ? `<div class="sig-good-head" style="border-top:0;padding-top:14px">Coaching</div>
+      ${clients.length > 1 ? row('co-roster', '', 'All athletes', `Triage everyone at once · ${clients.length} clients`, App.view === 'roster') : ''}
+      ${clients.map(c => row('co-open', `data-id="${c.id}"`, U.esc(c.coachOf.athleteName) + (c.demo ? ' <span class="tag">demo</span>' : ''),
+        (c.coachOf.progress && c.coachOf.progress.totals ? c.coachOf.progress.totals.workouts + ' workouts · ' : '') + (c.demo ? 'demo data' : (syncStatusLine(c.coachOf) || 'not synced')),
+        c.id === curId && App.view !== 'roster')).join('')}` : ''}
+    <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
 }
 
 function renderTabs(prof) {
@@ -5880,7 +6066,9 @@ function renderToday(prof) {
       <div class="mt8">${weekStripHtml(prof) || wk.dots}</div>
       ${dayMoveSummaryHtml(prof)}
       ${lastLog ? `<div class="row mt8" style="align-items:center"><span class="muted">Last lift: ${U.esc(lastLog.dayName)} · ${U.fmtDate(lastLog.date)}</span><span class="spacer"></span><button class="btn ghost sm" data-a="go-history">Past workouts ›</button></div>` : ''}
-      ${(() => { const nw = nextWeekStripHtml(prof); return nw ? `<div class="nextweek-head"><span>Next week</span><span class="nextweek-sub">tap a day to view or edit</span></div>${nw}<div class="muted" style="font-size:11.5px;margin-top:7px;line-height:1.45">Tap any day to preview it — on a gym day you can change next week’s workout (just next week, or your whole plan).</div>` : ''; })()}
+      ${prof.plan ? (() => { const pv = nextWeekProvenance(prof); return `<button class="nextweek-link" data-a="wk-open" data-wk="${weekKeyNext()}">
+        <span class="nwl-tx"><span class="nwl-h">Next week</span><span class="nwl-s">${weekRangeLabel(weekKeyNext())} · ${pv.label}</span></span>
+        <span class="nwl-go">›</span></button>`; })() : ''}
     </div>
     ${fullPlanCard}
     ${(() => {
@@ -5970,7 +6158,9 @@ function renderWorkoutEx(prof, e, ei) {
   const plan = e.plan;
   const tgt = ex.timed ? `${plan.sets} × ${plan.repsMin}–${plan.repsMax}s hold` :
     `${plan.sets} sets × ${plan.repsMin}–${plan.repsMax} reps${ex.unilateral ? ' each side' : ''}`;
-  const hint = e.isNew && !ex.bw ? `<div class="wo-target" style="color:#C2400C">First time — pick a weight that leaves ~2 reps in the tank</div>` : '';
+  // v3.21 — the "why" replaces the old first-time hint when we have a better reason
+  const whyLine = e.why ? `<div class="wo-why"><span class="wo-why-q">why</span>${U.esc(e.why)}</div>` : '';
+  const hint = (!e.why && e.isNew && !ex.bw) ? `<div class="wo-target" style="color:#C2400C">First time — pick a weight that leaves ~2 reps in the tank</div>` : '';
   const lastP = lastPerformance(prof, ex.id);
   const lastLine = (App.vsLast && lastP) ? `<div class="wo-last">Last time: ${U.esc(lastP.str)} · ${U.fmtDateShort(lastP.date)}</div>` : '';
   const topW = Math.max(...e.sets.map(x => x.w || 0), 0);
@@ -5987,7 +6177,7 @@ function renderWorkoutEx(prof, e, ei) {
       </div>`).join('');
   return `<div class="wo-ex ${active ? 'active' : ''} ${complete ? 'done-ex' : ''}" data-ei="${ei}">
     <div class="wo-ex-head">
-      <div style="flex:1"><div class="nm">${U.esc(ex.name)} ${ssBadge}</div><div class="wo-target">${tgt}</div>${noteLine}${lastLine}${plateLine}${hint}</div>
+      <div style="flex:1"><div class="nm">${U.esc(ex.name)} ${ssBadge}</div><div class="wo-target">${tgt}</div>${whyLine}${noteLine}${lastLine}${plateLine}${hint}</div>
       <button class="iconbtn" data-a="wo-how" data-ex="${ex.id}" title="How to">${IC('play')}</button>
       <button class="iconbtn" data-a="wo-swap" data-ei="${ei}" title="Swap">${IC('swap')}</button>
     </div>
@@ -6703,14 +6893,14 @@ function renderPlanView(prof) {
       <div class="sub">${coachOf ? 'Every save syncs to their phone · ' : ''}${U.esc(plan.splitName)} · ${GOALS[plan.goal].label} ${IC(GOALS[plan.goal].emoji)}</div></div>
       <button class="btn sm ghost" data-a="prefs-open">Adjust</button>
     </div>
-    ${coachOf ? `<div class="coach-note" style="margin-bottom:12px">This is the week ${U.esc(coachOf.athleteName)} sees. Tap any day’s to change exercises, sets, reps — and leave notes.</div>` : ''}
+    <div class="seg plan-seg">
+      <button class="${App.planTab !== 'template' ? 'on' : ''}" data-a="plan-tab" data-v="weeks">Weeks</button>
+      <button class="${App.planTab === 'template' ? 'on' : ''}" data-a="plan-tab" data-v="template">Template</button>
+    </div>
+    ${App.planTab !== 'template' ? renderWeeksTab(prof) : `
+    ${coachOf ? `<div class="coach-note" style="margin-bottom:12px">This is the standard week ${U.esc(coachOf.athleteName)} sees. Tap any day to change exercises, sets, reps — and leave notes.</div>`
+      : `<div class="muted" style="font-size:12.5px;line-height:1.5;margin-bottom:12px">Your repeating weekly template. Editing here changes every week from now on — to change just one week, use <b>Weeks</b>.</div>`}
     ${weekCard}
-    ${coachOf && prof.plan ? `<div class="card">
-      <div class="row"><h3>Next week</h3><span class="spacer"></span><span class="muted">plan ahead</span></div>
-      <div class="muted mt8" style="font-size:12px;line-height:1.5">Set up ${U.esc(coachOf.athleteName)}’s upcoming week without touching her standard plan — tap a day to edit it. Changes sync on your next push.</div>
-      <div class="nextweek-head" style="border-top:0;padding-top:6px;margin-top:10px"><span>Next week</span><span class="nextweek-sub">tap a day to edit</span></div>
-      ${nextWeekStripHtml(prof)}
-    </div>` : ''}
     <div class="row" style="align-items:center;margin:4px 2px 10px"><span class="muted" style="font-size:12.5px;font-weight:700">${coachOf ? U.esc(coachOf.athleteName) + '’s workouts' : 'Your workouts'}</span><span class="spacer"></span>${vsLastToggleBtn('vslast')}</div>
     ${plan.days.map((d, i) => `
       <div class="card day-card">
@@ -6788,7 +6978,7 @@ function renderPlanView(prof) {
       <h3>Fresh block</h3>
       <p class="muted mt8" style="line-height:1.5">Regenerating rebuilds the week with new exercise choices — including any days you’ve edited. Your weights, records and saved workouts always carry over.</p>
       <button class="btn ghost block mt12" data-a="plan-regen">Regenerate plan</button>
-    </div>
+    </div>`}
   </div>`;
 }
 
@@ -6952,16 +7142,23 @@ function renderProfileView(prof) {
     ${(() => {
       if (prof.isCoach) return '';
       const clients = Object.values(App.data.profiles).filter(p => p.isCoach && p.coachOf);
-      if (!clients.length) return '';
-      return `<div class="card"><h3>Your clients</h3>
-        <p class="muted mt8">Tap a name to open their coaching space — build their plan there.</p>
+      const anyDemo = clients.some(c => c.demo);
+      if (!clients.length) return `<div class="card"><h3>Coaching</h3>
+        <p class="muted mt8">Coach someone from this phone — or load a demo squad to see how the coaching view looks with a full roster.</p>
+        <div class="row mt8"><button class="btn ghost sm" data-a="co-start">+ Coach someone new</button>
+        <button class="btn ghost sm" data-a="co-demo-load">Load demo squad</button></div>
+      </div>`;
+      return `<div class="card"><h3>Your athletes</h3>
+        <p class="muted mt8">${clients.length > 1 ? 'Open the roster to triage everyone at once, or tap a name to go straight in.' : 'Tap a name to open their coaching space — build their plan there.'}</p>
+        ${clients.length > 1 ? `<button class="btn dark block mt8" data-a="co-roster">Open coaching roster (${clients.length}) ›</button>` : ''}
         <div class="mt8">${clients.map(c => `<button class="prof-row" style="width:100%;text-align:left" data-a="co-open" data-id="${c.id}">
           <span class="em">${IC('user')}</span>
-          <span style="flex:1"><div class="nm">${U.esc(c.coachOf.athleteName)}</div>
-          <div class="meta">${c.coachOf.progress ? (w => w + ' ' + U.plural(w, 'workout') + ' logged · ')((c.coachOf.progress.totals || {}).workouts || 0) : ''}${U.esc(syncStatusLine(c.coachOf) || 'not synced yet')}</div></span>
+          <span style="flex:1"><div class="nm">${U.esc(c.coachOf.athleteName)}${c.demo ? ' <span class="tag" style="vertical-align:2px">demo</span>' : ''}</div>
+          <div class="meta">${c.coachOf.progress ? (w => w + ' ' + U.plural(w, 'workout') + ' logged · ')((c.coachOf.progress.totals || {}).workouts || 0) : ''}${U.esc(c.demo ? 'seeded demo data' : (syncStatusLine(c.coachOf) || 'not synced yet'))}</div></span>
           <span class="muted" style="font-weight:800">Open →</span>
         </button>`).join('')}</div>
         <div class="row mt8"><button class="btn ghost sm" data-a="co-start">+ Coach someone new</button>
+        ${anyDemo ? '<button class="btn ghost sm" data-a="co-demo-clear">Remove demo squad</button>' : '<button class="btn ghost sm" data-a="co-demo-load">Load demo squad</button>'}
         ${prof.coachSync ? '' : '<button class="btn ghost sm" data-a="co-pair-open">I have a coach code</button>'}</div>
       </div>`;
     })()}
@@ -7037,6 +7234,21 @@ function dispatch(e) {
   // v2: trimmer, deload, badges/share, body log, exercise prefs
   if (prof && v2Action(a, el, prof)) return;
   // v2.1: coach mode
+  // v3.22 weeks timeline
+  if (a === 'plan-tab') {
+    App.planTab = el.dataset.v === 'template' ? 'template' : 'weeks';
+    try { localStorage.setItem('liftoff.plantab', App.planTab); } catch (e) {}   // stick to whichever half you live in
+    App._scrollTop = true; render(); return;
+  }
+  if (a === 'wk-open') { showWeekSheet(prof, el.dataset.wk); return; }
+  if (a === 'wk-session') { showSessionSheet(prof, el.dataset.date, el.dataset.id); return; }
+  if (a === 'wk-editnext') {
+    const wd = [0, 1, 2, 3, 4, 5, 6].find(d => ((prof.quiz.weekSchedule || {})[d] === 'lift') && workoutForWeekdayInWeek(prof, d, weekKeyNext()));
+    if (wd == null) { toast('No lifting days scheduled next week'); return; }
+    closeSheet();
+    const el2 = document.createElement('button'); el2.dataset.d = String(wd);
+    customAction('nextweek-edit', el2, prof); return;
+  }
   if (a.startsWith('co-')) return coachAction(a, el, prof);
   // v2.7: mobility — warm-up/cooldown rows + relief tool
   if (a.startsWith('mob-')) return mobAction(a, el, prof);
@@ -7357,6 +7569,23 @@ function showBuilderSheet(prof) {
           <button data-a="cw-reststep" data-i="${i}" data-d="-1">−</button><b class="cwv" data-a="cw-typein" data-i="${i}" data-f="rest" title="Tap to type — seconds or 1:30">${U.fmtDur(pe.rest)}</b><button data-a="cw-reststep" data-i="${i}" data-d="1">+</button></div>
         ${i < d.exercises.length - 1 ? `<button class="cwx-ctl cwx-link ${pe.ssWithNext ? 'on' : ''}" data-a="cw-link" data-i="${i}"><span class="lb">Pair</span><b>${pe.ssWithNext ? 'superset' : '+ superset'}</b></button>` : ''}
       </div>
+      ${(!ex.bw && !ex.timed) ? `<div class="cwx-rails">
+        <span class="lb">Progression</span>
+        <div class="seg rail-seg">
+          ${[['auto', 'Auto'], ['push', 'Push'], ['hold', 'Hold']].map(([v, l]) =>
+            `<button class="${(pe.prog || 'auto') === v ? 'on' : ''}" data-a="cw-prog" data-i="${i}" data-v="${v}">${l}</button>`).join('')}
+        </div>
+        <div class="rail-cap">
+          <span class="lb">Ceiling</span>
+          <button class="wstep" data-a="cw-capstep" data-i="${i}" data-d="-1">−</button>
+          <b class="cwv ${pe.cap == null ? 'auto' : ''}" data-a="cw-typein" data-i="${i}" data-f="cap" title="Tap to type — or leave as none">${pe.cap != null ? U.fmtW(pe.cap, prof.units) + U.unitLabel(prof.units) : 'None'}</b>
+          <button class="wstep" data-a="cw-capstep" data-i="${i}" data-d="1">+</button>
+          ${pe.cap != null ? `<button class="cwx-auto" data-a="cw-capclear" data-i="${i}">↺</button>` : ''}
+        </div>
+        <div class="rail-hint">${(pe.prog || 'auto') === 'hold' ? 'Weight stays put — reps can still climb.'
+          : (pe.prog || 'auto') === 'push' ? 'Moves up even on a hard session — use sparingly.'
+          : 'Rises when they finish every set in range; holds if they rate it hard.'}${pe.cap != null ? ` Never above ${U.fmtW(pe.cap, prof.units)}${U.unitLabel(prof.units)}.` : ''}</div>
+      </div>` : ''}
       ${(!ex.bw && !ex.timed) ? `<div class="cwx-weight"><span class="lb">Weight</span>
         <button class="wstep" data-a="cw-wstep" data-i="${i}" data-d="-1">−</button>
         <b class="cwv ${pe.w == null ? 'auto' : ''}" data-a="cw-typein" data-i="${i}" data-f="w" title="Tap to type — or leave on Auto">${pe.w != null ? U.fmtW(pe.w, prof.units) + U.unitLabel(prof.units) : 'Auto'}</b>
@@ -7529,6 +7758,26 @@ function customAction(a, el, prof) {
     delete pe.w;
     showBuilderSheet(prof); return;
   }
+  if (a === 'cw-prog') {   // v3.21 coach rails: how this lift is allowed to progress
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    const v = el.dataset.v;
+    if (v === 'auto') delete pe.prog; else pe.prog = v;
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-capstep') {   // a ceiling the engine must never cross
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    const ex = EX_BY_ID[pe.exId];
+    const inc = (ex && ex.inc) || 2.5, delta = +el.dataset.d;
+    const base = pe.cap != null ? +pe.cap : (resolvePlanWeight(prof, pe).w || 0);
+    const next = U.round(base + delta * inc, roundStepFor(ex));
+    if (next <= 0) delete pe.cap; else pe.cap = U.clamp(next, 0, 999);
+    showBuilderSheet(prof); return;
+  }
+  if (a === 'cw-capclear') {
+    const pe = App.cwDraft.exercises[+el.dataset.i];
+    delete pe.cap;
+    showBuilderSheet(prof); return;
+  }
   if (a === 'cw-reststep') {
     const pe = App.cwDraft.exercises[+el.dataset.i];
     const delta = +el.dataset.d;
@@ -7545,12 +7794,17 @@ function customAction(a, el, prof) {
     if (el.querySelector('input')) return;
     const i = +el.dataset.i, f = el.dataset.f, pe = App.cwDraft.exercises[i];
     if (!pe) return;
-    const cur = f === 'sets' ? String(pe.sets) : f === 'reps' ? `${pe.repsMin}-${pe.repsMax}` : f === 'w' ? (pe.w != null ? String(pe.w) : '') : String(pe.rest);
-    const hint = f === 'reps' ? '8-12' : f === 'rest' ? 'sec' : f === 'w' ? 'auto' : '';
+    const cur = f === 'sets' ? String(pe.sets) : f === 'reps' ? `${pe.repsMin}-${pe.repsMax}` : f === 'w' ? (pe.w != null ? String(pe.w) : '') : f === 'cap' ? (pe.cap != null ? String(pe.cap) : '') : String(pe.rest);
+    const hint = f === 'reps' ? '8-12' : f === 'rest' ? 'sec' : f === 'w' ? 'auto' : f === 'cap' ? 'none' : '';
     el.innerHTML = `<input class="cwv-input" type="text" inputmode="${f === 'reps' ? 'text' : 'numeric'}" enterkeyhint="done" value="${U.esc(cur)}" placeholder="${hint}">`;
     const inp = el.querySelector('input'); inp.focus(); inp.select();
     const commit = () => {
       const raw = (inp.value || '').trim();
+      if (f === 'cap') { // blank or "none" → no ceiling
+        if (raw === '' || /none|auto/i.test(raw)) delete pe.cap;
+        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n > 0) pe.cap = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId])), 0, 999); }
+        showBuilderSheet(prof); return;
+      }
       if (f === 'w') { // blank or "auto" → progression drives it; a number pins it
         if (raw === '' || /auto/i.test(raw)) delete pe.w;
         else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n >= 0) pe.w = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId])), 0, 999); }
@@ -7594,7 +7848,7 @@ function customAction(a, el, prof) {
       if (d.scope === 'nextweek') { // one-off override for the upcoming week only — standard plan untouched
         ensureWeekPlan(prof); pruneWeekPlan(prof);
         const wk = weekKeyNext();
-        (prof.plan.weekPlan[wk] = prof.plan.weekPlan[wk] || {})[d.planIdx] = { name, note: (d.note || '').trim(), exercises: d.exercises };
+        (prof.plan.weekPlan[wk] = prof.plan.weekPlan[wk] || {})[d.planIdx] = { name, note: (d.note || '').trim(), exercises: d.exercises, by: prof.isCoach ? 'coach' : 'athlete', at: U.todayISO() };
         saveApp(); closeSheet(); render();
         toast(`Next week’s “${name}” set — your standard plan is unchanged`);
         return;
@@ -8036,6 +8290,122 @@ function v2Action(a, el, prof) {
 
 /* ---------- coach home (replaces Today in a coach workspace) ---------- */
 /* ============================================================
+   v3.21 — DEMO SQUAD
+   Seeds a realistic roster so the coaching view can be shown at scale.
+   Every profile is flagged `demo:true`: skipped by syncTick (never touches
+   the relay) and removable in one tap. Histories are hand-shaped so each
+   athlete raises a specific, recognisable signal.
+============================================================ */
+const DEMO_SQUAD = [
+  { n: 'Sarah Chen',    s: 'quiet',   goal: 'muscle',      exp: 'intermediate' },
+  { n: 'Marcus Webb',   s: 'under',   goal: 'strength',    exp: 'intermediate' },
+  { n: 'Priya Patel',   s: 'stalled', goal: 'muscle',      exp: 'advanced' },
+  { n: 'Tom Bright',    s: 'hard',    goal: 'muscle',      exp: 'beginner' },
+  { n: 'Aisha Rahman',  s: 'flying',  goal: 'strength',    exp: 'intermediate' },
+  { n: 'Jack Doyle',    s: 'noplan',  goal: 'fitness',     exp: 'beginner' },
+  { n: 'Elena Marsh',   s: 'good',    goal: 'muscle',      exp: 'intermediate' },
+  { n: 'Dan Osei',      s: 'pr',      goal: 'performance', exp: 'advanced' },
+];
+const _dIso = n => { const d = new Date(); d.setDate(d.getDate() - n);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+/* deterministic per-athlete history shaped to raise one headline signal */
+function demoProgressDoc(spec) {
+  const sched = { 0: 'lift', 1: 'rest', 2: 'lift', 3: 'rest', 4: 'lift', 5: 'rest', 6: 'rest' };
+  const push = [{ id: 'bench_bb', w: 60 }, { id: 'ohp_bb', w: 35 }, { id: 'pushdown', w: 25 }];
+  const pull = [{ id: 'row_bb', w: 55 }, { id: 'pulldown', w: 45 }, { id: 'curl_db', w: 12 }];
+  const legs = [{ id: 'bb_backsquat', w: 80 }, { id: 'rdl_bb', w: 70 }, { id: 'leg_press', w: 120 }];
+  const days = [{ name: 'Upper Push', ex: push }, { name: 'Lower', ex: legs }, { name: 'Upper Pull', ex: pull }];
+  const logs = [], prs = {}, exTop = {};
+  // 9 sessions over ~3 weeks. A given lift recurs every 3rd session, so each has
+  // exactly 3 data points spanning ~14 days — enough for the stall/flying windows.
+  const offs = spec.s === 'quiet' ? [9, 11, 14, 16, 18, 21, 23, 25, 28] : [1, 3, 5, 8, 10, 12, 15, 17, 19];
+  offs.forEach((off, i) => {
+    const day = days[i % 3];
+    const back = Math.floor(i / 3);                  // 0 = newest week, 2 = oldest
+    const entries = day.ex.map((x, xi) => {
+      const step = (EX_BY_ID[x.id] || {}).inc || 2.5;
+      // Baseline everyone on the SAME weight with reps creeping 8→9 on the newest
+      // week: ~2.6% e1RM gain — healthy progress, below the 4% "flying" bar and
+      // above the 0.5% "stalled" floor. Signals then have to be earned.
+      let w = x.w, reps = back === 0 ? 9 : 8;
+      let target = w, feel = null, coachSet = false;
+      if (spec.s === 'flying' && xi === 0) { w = x.w - back * step * 2; reps = 8; target = w; }   // real climb
+      if (spec.s === 'stalled' && x.id === 'bb_backsquat') { reps = 8; }                          // flat = no gain
+      // keep each demo story to ONE lift-group so the signal text matches its numbers
+      if (spec.s === 'under' && i % 3 === 0 && xi === 0) { target = x.w + step * 4; coachSet = true; w = Math.round((target * 0.82) / 0.5) * 0.5; }
+      if (spec.s === 'hard' && i % 3 === 0 && xi < 2) feel = 'hard';
+      return { exId: x.id, feel, targetW: target, coachSet,
+        sets: [{ w, reps }, { w, reps }, { w, reps: Math.max(5, reps - 1) }] };
+    });
+    logs.push({ date: _dIso(off), dayName: day.name, durationMin: 38 + (i % 4) * 4,
+      react: i === 0 && spec.s === 'hard' ? 'tough' : null, note: null, entries });
+  });
+  logs.sort((a, b) => a.date < b.date ? -1 : 1);      // chronological, as the real sync sends them
+  for (const l of logs) for (const e of l.entries) {
+    const top = Math.max(...e.sets.map(s => s.w));
+    const best = e.sets.reduce((a, s) => e1rm(s.w, s.reps) > e1rm(a.w, a.reps) ? s : a, e.sets[0]);
+    if (!exTop[e.exId] || top >= exTop[e.exId].w) exTop[e.exId] = { d: l.date, w: top, e: e1rm(best.w, best.reps) };
+  }
+  if (spec.s === 'pr') {   // Dan's headline is the celebration, nothing else
+    prs['bb_backsquat'] = { w: (exTop['bb_backsquat'] || { w: 80 }).w, date: _dIso(2), reps: 5 };
+    prs['rdl_bb'] = { w: (exTop['rdl_bb'] || { w: 70 }).w, date: _dIso(2), reps: 6 };
+  }
+  return {
+    v: 1, name: spec.n.split(' ')[0], emoji: '', units: 'kg',
+    quiz: { goal: spec.goal, experience: spec.exp, daysPerWeek: 3, sessionMinutes: 60,
+      equipment: ['barbell', 'dumbbell', 'machine', 'cable', 'bodyweight', 'bench'], focus: [],
+      athleteType: 'gym', sportLabel: '', weekSchedule: sched, videoPref: 'auto', bodySex: 'female' },
+    plan: null, logs, prs, exTop, sportLogs: [], bodyLogs: [], badges: {}, dayMoves: {},
+    msgReact: null, totals: { workouts: 20 + logs.length, since: _dIso(120) },
+    program: { n: 2, start: U.weekKey(_dIso(14)) },
+    appliedPlanRev: spec.s === 'noplan' ? 1 : 4,
+  };
+}
+
+function seedDemoSquad() {
+  let made = 0;
+  for (const spec of DEMO_SQUAD) {
+    if (Object.values(App.data.profiles).some(p => p.demo && p.coachOf && p.coachOf.athleteName === spec.n)) continue;
+    const id = U.uid();
+    const p = {
+      id, name: `${spec.n} (coaching)`, emoji: 'user', createdAt: _dIso(120), units: 'kg', planCount: 0,
+      logs: [], sportLogs: [], exState: {}, prs: {}, customWorkouts: [], customMap: {}, exPrefs: {},
+      badges: {}, bodyLogs: [], barKg: 20, isCoach: true, demo: true,
+      coachDisplayName: 'Coach', coachMsg: '',
+      coachOf: { key: 'DEMO' + id, athleteName: spec.n, pendingPlanPush: false, progressRev: 4,
+        lastPlanRev: 4, lastSyncAt: Date.now() - 6e5, progress: demoProgressDoc(spec) },
+      quiz: { goal: spec.goal, experience: spec.exp, daysPerWeek: 3, sessionMinutes: 60,
+        equipment: ['barbell', 'dumbbell', 'machine', 'cable', 'bodyweight', 'bench'], focus: [],
+        athleteType: 'gym', sportLabel: '', weekSchedule: { 0: 'lift', 1: 'rest', 2: 'lift', 3: 'rest', 4: 'lift', 5: 'rest', 6: 'rest' },
+        videoPref: 'auto', bodySex: 'female' },
+      program: { n: 2, start: U.weekKey(_dIso(14)) },
+    };
+    migrateProfile(p);
+    p.plan = generatePlan(p);
+    p.coachOf.progress.plan = { daysPerWeek: p.plan.daysPerWeek,
+      days: (p.plan.days || []).map(d => ({ name: d.name, focus: d.focus || null, note: d.note || '', exercises: (d.exercises || []).map(packPe) })) };
+    App.data.profiles[id] = p;
+    made++;
+  }
+  saveApp();
+  return made;
+}
+
+function removeDemoSquad() {
+  let n = 0;
+  for (const [id, p] of Object.entries(App.data.profiles)) {
+    if (p.demo) { delete App.data.profiles[id]; n++; }
+  }
+  if (!App.data.profiles[App.data.activeProfileId]) {
+    const first = Object.values(App.data.profiles)[0];
+    App.data.activeProfileId = first ? first.id : null;
+  }
+  saveApp();
+  return n;
+}
+
+/* ============================================================
    v3.20 — EXCEPTION DASHBOARD (coach triage)
    A coach's scarcest resource is attention. Instead of a roster of
    identical cards, surface only what actually needs them today.
@@ -8086,7 +8456,7 @@ function computeSignals(pg, co) {
      normally chronological, but a merge or re-import must not fake a gap. */
   const last = logs.reduce((a, l) => (!a || l.date > a.date) ? l : a, null);
   if (!last) {
-    out.push({ kind: 'quiet', sev: 3, mag: 999, title: `${U.esc(name)} hasn’t logged anything yet`,
+    out.push({ kind: 'quiet', sev: 3, mag: 999, title: `${U.esc(name)} hasn’t logged anything yet`, bare: 'Hasn’t logged anything yet',
       detail: 'No sessions have come through. Worth checking they’ve applied your plan and can find the Start button.',
       act: 'co-focus-msg', actLabel: 'Check in' });
   } else {
@@ -8099,7 +8469,7 @@ function computeSignals(pg, co) {
     }
     if (missed >= 2 || gap >= 7) {
       out.push({ kind: 'quiet', sev: 3, mag: missed * 10 + gap,
-        title: `${U.esc(name)} has gone quiet`,
+        title: `${U.esc(name)} has gone quiet`, bare: 'Has gone quiet',
         detail: `Last session ${U.fmtDateShort(last.date)}, ${gap} ${U.plural(gap, 'day')} ago${missed ? ` — ${missed} planned ${U.plural(missed, 'session')} missed since` : ''}.`,
         act: 'co-focus-msg', actLabel: 'Check in' });
     }
@@ -8113,7 +8483,7 @@ function computeSignals(pg, co) {
     const freq = {}; hard.forEach(id => freq[id] = (freq[id] || 0) + 1);
     const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([id]) => ({ id }));
     out.push({ kind: 'hard', sev: 3, mag: hard.length,
-      title: `${U.esc(name)} is finding it hard`,
+      title: `${U.esc(name)} is finding it hard`, bare: 'Finding it hard',
       detail: `${hard.length} lifts rated hard in the last 10 days — mostly ${list(top, 2)}. Could be load, could be life.`,
       act: 'co-focus-msg', actLabel: 'Ask how they’re doing' });
   }
@@ -8221,6 +8591,236 @@ function coachTriageHtml(prof) {
   </div>`;
 }
 
+/* ============================================================
+   v3.22 — WEEKS TIMELINE
+   One spine for "what am I looking at": next week (and who set it), this week
+   in progress, and every completed week you can drill into. Works for the
+   athlete's own logs and, unchanged, for a coach reading a client's synced ones.
+============================================================ */
+function weeksSource(prof) {
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const pg = isCoach ? (prof.coachOf.progress || {}) : null;
+  return {
+    isCoach,
+    logs: isCoach ? (pg.logs || []) : (prof.logs || []),
+    prs: isCoach ? (pg.prs || {}) : (prof.prs || {}),
+    units: isCoach ? (pg.units || prof.units) : prof.units,
+    sched: (isCoach ? ((pg.quiz || {}).weekSchedule) : prof.quiz.weekSchedule) || {},
+    name: isCoach ? (prof.coachOf.athleteName || 'They') : 'You',
+  };
+}
+const _weekEndISO = wk => { const d = U.parseISO(wk); d.setDate(d.getDate() + 6); return _isoOf(d); };
+function weekRangeLabel(wk) {
+  const a = U.parseISO(wk), b = U.parseISO(_weekEndISO(wk));
+  const m = d => d.toLocaleDateString(undefined, { month: 'short' });
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()}–${b.getDate()} ${m(b)}`
+    : `${a.getDate()} ${m(a)} – ${b.getDate()} ${m(b)}`;
+}
+function weekSummary(prof, wk) {
+  const src = weeksSource(prof);
+  const end = _weekEndISO(wk);
+  const sessions = src.logs.filter(l => l.date >= wk && l.date <= end).sort((a, b) => a.date < b.date ? -1 : 1);
+  const planned = Object.values(src.sched).filter(v => v === 'lift').length;
+  const prs = Object.entries(src.prs).filter(([, p]) => p && p.date >= wk && p.date <= end).length;
+  const vol = sessions.reduce((t, l) => t + (l.entries || []).reduce((s, e) =>
+    s + (e.sets || []).reduce((x, st) => x + (st.w || 0) * (st.reps || 0), 0), 0), 0);
+  const mins = sessions.reduce((t, l) => t + (l.durationMin || 0), 0);
+  return { wk, sessions, done: sessions.length, planned, prs, vol, mins };
+}
+/* who set next week, said plainly — no workflow, just the truth */
+function nextWeekProvenance(prof) {
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const wp = (prof.plan && prof.plan.weekPlan) || {};
+  const ov = wp[weekKeyNext()];
+  const days = ov ? Object.values(ov) : [];
+  if (!days.length) return { label: 'Following your standard plan', tone: 'plain' };
+  const byCoach = days.some(d => d.by === 'coach');
+  const byAthlete = days.some(d => d.by === 'athlete' || !d.by);
+  if (isCoach) return { label: byAthlete && !byCoach ? `${U.esc(prof.coachOf.athleteName)} adjusted next week` : 'You’ve adjusted next week', tone: 'coach' };
+  if (byCoach && !byAthlete) return { label: `Set by ${U.esc((prof.coachSync && prof.coachSync.coachName) || 'your coach')}`, tone: 'coach' };
+  if (byCoach && byAthlete) return { label: 'You and your coach have both changed this', tone: 'mixed' };
+  return { label: prof.coachSync ? 'You changed this — your coach hasn’t seen it yet' : 'You’ve adjusted next week', tone: 'you' };
+}
+
+function renderWeeksTab(prof) {
+  const src = weeksSource(prof);
+  const thisWk = weekKeyThis(), nextWk = weekKeyNext();
+  const t = weekSummary(prof, thisWk);
+  const prov = nextWeekProvenance(prof);
+  const nextDays = [];
+  for (let d = 0; d < 7; d++) {
+    if ((src.sched[d] || 'rest') !== 'lift') continue;
+    const w = workoutForWeekdayInWeek(prof, d, nextWk);
+    if (w) nextDays.push({ d, name: w.name, override: !!w.override });
+  }
+  const past = [...new Set(src.logs.map(l => U.weekKey(l.date)))]
+    .filter(k => k < thisWk).sort((a, b) => a < b ? 1 : -1).slice(0, 12)
+    .map(k => weekSummary(prof, k));
+
+  return `
+    <button class="card wk wk-next" data-a="wk-open" data-wk="${nextWk}">
+      <div class="wk-head"><span class="wk-kick">Next week</span><span class="wk-range">${weekRangeLabel(nextWk)}</span></div>
+      <div class="wk-prov t-${prov.tone}">${prov.label}</div>
+      <div class="wk-body">${nextDays.length
+        ? `${nextDays.length} ${U.plural(nextDays.length, 'session')} planned · ${nextDays.map(x => U.esc(x.name)).join(', ')}`
+        : 'No lifting days scheduled'}</div>
+      <div class="wk-go">Preview &amp; edit ›</div>
+    </button>
+
+    <button class="card wk wk-now" data-a="wk-open" data-wk="${thisWk}">
+      <div class="wk-head"><span class="wk-kick">This week</span><span class="wk-range">${weekRangeLabel(thisWk)}</span></div>
+      <div class="wk-body"><b>${t.done} of ${t.planned || t.done}</b> ${U.plural(t.planned || t.done, 'session')} done${t.prs ? ` · ${t.prs} new best${t.prs > 1 ? 's' : ''}` : ''}${t.mins ? ` · ${t.mins} min` : ''}</div>
+      <div class="wk-bar"><i style="width:${t.planned ? Math.min(100, Math.round(t.done / t.planned * 100)) : 0}%"></i></div>
+      <div class="wk-go">See the week ›</div>
+    </button>
+
+    ${past.length ? `<div class="wk-sec">Completed weeks</div>
+      <div class="card" style="padding-top:4px;padding-bottom:4px">
+        ${past.map(w => `<button class="wk-row" data-a="wk-open" data-wk="${w.wk}">
+          <span class="wk-row-tx"><span class="wk-row-n">${weekRangeLabel(w.wk)}</span>
+            <span class="wk-row-m">${w.done} ${U.plural(w.done, 'session')}${w.planned ? ` of ${w.planned}` : ''}${w.prs ? ` · ${w.prs} PR${w.prs > 1 ? 's' : ''}` : ''}${w.mins ? ` · ${w.mins} min` : ''}</span></span>
+          <span class="wk-row-b ${w.planned && w.done >= w.planned ? 'full' : w.done ? 'part' : 'none'}">${w.planned && w.done >= w.planned ? '✓' : w.done + '/' + (w.planned || w.done)}</span>
+        </button>`).join('')}
+      </div>`
+      : `<div class="wk-sec">Completed weeks</div>
+         <div class="card"><p class="muted" style="font-size:13px;line-height:1.5">Nothing finished yet — completed weeks show up here, and you can open any session to see exactly what was lifted.</p></div>`}
+    <div style="height:70px"></div>`;
+}
+
+/* one week, day by day — the drill-in from the timeline */
+function showWeekSheet(prof, wk) {
+  const src = weeksSource(prof);
+  const thisWk = weekKeyThis(), nextWk = weekKeyNext();
+  const when = wk === thisWk ? 'this' : wk === nextWk ? 'next' : 'past';
+  const sum = weekSummary(prof, wk);
+  const rows = [];
+  for (let d = 0; d < 7; d++) {
+    const date = _isoOf((() => { const x = U.parseISO(wk); x.setDate(x.getDate() + d); return x; })());
+    const logs = sum.sessions.filter(l => l.date === date);
+    const act = src.sched[d] || 'rest';
+    if (logs.length) {
+      rows.push(logs.map(l => `<button class="wk-day done" data-a="wk-session" data-wk="${wk}" data-id="${l.id || l.date}" data-date="${l.date}">
+        <span class="wk-day-d">${WEEKDAYS[d]}</span>
+        <span class="wk-day-tx"><span class="nm">${U.esc(l.dayName || 'Session')}</span>
+          <span class="mt">${(l.entries || []).length} exercises · ${l.durationMin || 0} min${l.react ? ' · felt ' + U.esc(REACT_LABELS[l.react] || l.react) : ''}</span></span>
+        <span class="wk-day-go">✓</span></button>`).join(''));
+    } else if (when === 'past') {
+      rows.push(`<div class="wk-day miss"><span class="wk-day-d">${WEEKDAYS[d]}</span>
+        <span class="wk-day-tx"><span class="nm">${act === 'lift' ? 'Not logged' : act === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, act))}</span></span></div>`);
+    } else {
+      const w4 = act === 'lift' ? workoutForWeekdayInWeek(prof, d, wk) : null;
+      rows.push(`<button class="wk-day" data-a="${when === 'next' ? 'nextweek-peek' : 'day-peek'}" data-d="${d}">
+        <span class="wk-day-d">${WEEKDAYS[d]}</span>
+        <span class="wk-day-tx"><span class="nm">${w4 ? U.esc(w4.name) : act === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, act))}</span>
+          ${w4 ? `<span class="mt">${w4.exercises.length} exercises · ~${estMinutes({ exercises: w4.exercises })} min</span>` : ''}</span>
+        <span class="wk-day-go">›</span></button>`);
+    }
+  }
+  const prov = when === 'next' ? nextWeekProvenance(prof) : null;
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${when === 'this' ? 'This week' : when === 'next' ? 'Next week' : weekRangeLabel(wk)}
+      <span class="muted" style="font-size:13px;font-weight:600">· ${when === 'past' ? `${sum.done} ${U.plural(sum.done, 'session')}` : weekRangeLabel(wk)}</span></h3>
+    ${prov ? `<div class="wk-prov t-${prov.tone}" style="margin-top:8px">${prov.label}</div>` : ''}
+    ${when === 'past' && sum.vol ? `<div class="muted mt8" style="font-size:12.5px">${Math.round(sum.vol).toLocaleString()} ${U.unitLabel(src.units)} total volume · ${sum.mins} min${sum.prs ? ` · ${sum.prs} new best${sum.prs > 1 ? 's' : ''}` : ''}</div>` : ''}
+    <div class="mt12">${rows.join('')}</div>
+    ${when === 'next' ? `<button class="btn ghost block mt12" data-a="wk-editnext">Edit next week ›</button>` : ''}
+    <button class="btn ghost block mt8" data-a="sheet-close">Close</button>`);
+}
+
+/* a single completed session, read-only, identical for coach and athlete */
+function showSessionSheet(prof, date, logId) {
+  const src = weeksSource(prof);
+  const log = src.logs.find(l => (logId && l.id === logId) || l.date === date);
+  if (!log) { closeSheet(); return; }
+  const u = src.units;
+  const setStr = (ex, s) => ex.timed ? `${s.reps}s` : `${s.w > 0 ? U.fmtW(s.w, u) + '×' : 'BW×'}${s.reps}`;
+  const body = (log.entries || []).map(e => {
+    const ex = EX_BY_ID[e.exId]; if (!ex) return '';
+    return `<div class="plan-ex"><span class="dot"></span>${U.esc(ex.name)}
+      <span class="sr">${(e.sets || []).map(s => setStr(ex, s)).join(' · ')}</span></div>${prescribedVsLifted(e, ex, u)}`;
+  }).join('');
+  const vol = (log.entries || []).reduce((s, e) => s + (e.sets || []).reduce((x, st) => x + (st.w || 0) * (st.reps || 0), 0), 0);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${U.esc(log.dayName || 'Session')}
+      <span class="muted" style="font-size:13px;font-weight:600">· ${U.fmtDate(log.date)}</span></h3>
+    <div class="muted mt8" style="font-size:12.5px">${log.durationMin || 0} min · ${(log.entries || []).length} exercises${vol ? ` · ${Math.round(vol).toLocaleString()} ${U.unitLabel(u)} volume` : ''}${log.react ? ` · felt ${U.esc(REACT_LABELS[log.react] || log.react)}` : ''}</div>
+    ${log.note ? `<div class="coach-note" style="margin-top:10px">“${U.esc(log.note)}”</div>` : ''}
+    <div class="mt12">${body}</div>
+    ${!src.isCoach && log.id ? `<button class="btn ghost block mt12" data-a="hist-open" data-id="${U.esc(log.id)}">Edit this session ›</button>` : ''}
+    <button class="btn ghost block mt8" data-a="sheet-close">Close</button>`);
+}
+
+/* ============================================================
+   v3.21 — ROSTER VIEW
+   Triage across every client at once. Same computeSignals() per athlete,
+   just mapped — which is exactly how it will work against a server roster.
+============================================================ */
+function coachClients() {
+  return Object.values(App.data.profiles)
+    .filter(p => p.isCoach && p.coachOf)
+    .sort((a, b) => (a.coachOf.athleteName || '').localeCompare(b.coachOf.athleteName || ''));
+}
+/* [{prof, sigs, worst}] — worst = highest severity raised by that athlete */
+function rosterSignals() {
+  return coachClients().map(p => {
+    const sigs = computeSignals(p.coachOf.progress, p.coachOf);
+    return { prof: p, sigs, worst: sigs.reduce((m, s) => Math.max(m, s.sev), 0) };
+  });
+}
+function renderCoachRoster(prof) {
+  const rows = rosterSignals();
+  const needing = rows.filter(r => r.worst >= 2);
+  const good = rows.filter(r => r.worst < 2);
+  const flat = [];
+  for (const r of rows) for (const s of r.sigs) if (s.sev >= 2) flat.push({ r, s });
+  flat.sort((a, b) => b.s.sev - a.s.sev || b.s.mag - a.s.mag);
+  const wins = [];
+  for (const r of rows) for (const s of r.sigs) if (s.sev === 1) wins.push({ r, s });
+
+  const chip = r => {
+    const last = (r.prof.coachOf.progress.logs || []).reduce((a, l) => (!a || l.date > a.date) ? l : a, null);
+    const d = last ? daysBetweenISO(last.date, U.todayISO()) : null;
+    return d == null ? 'no sessions yet' : d === 0 ? 'trained today' : d === 1 ? 'trained yesterday' : `${d} days ago`;
+  };
+  const card = r => `<button class="rost" data-a="co-open" data-id="${r.prof.id}">
+      <span class="rost-av ${r.worst >= 3 ? 'a3' : r.worst === 2 ? 'a2' : 'a1'}">${U.esc(initials(r.prof.coachOf.athleteName))}</span>
+      <span class="rost-tx"><span class="rost-n">${U.esc(r.prof.coachOf.athleteName)}</span>
+        <span class="rost-m">${chip(r)}${r.sigs.length ? ' · ' + r.sigs.filter(s => s.sev >= 2).length + ' flagged' : ''}</span></span>
+      ${r.worst >= 2 ? `<span class="rost-dot sev${r.worst}"></span>` : '<span class="rost-ok">✓</span>'}
+    </button>`;
+
+  const myProf = Object.values(App.data.profiles).find(p => !p.isCoach);
+  return `<div class="screen">
+    <div class="hdr"><div><div class="hi">Your athletes</div>
+      <div class="sub">${rows.length} ${U.plural(rows.length, 'client')} · ${needing.length ? `${needing.length} need${needing.length === 1 ? 's' : ''} you` : 'all on track'}${rows.length && rows.every(r => r.prof.demo) ? ' · demo data' : ''}</div></div>
+      <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
+
+    <div class="card triage">
+      <div class="row"><h3>Needs you</h3><span class="spacer"></span>
+        <span class="tag ${needing.length ? 'hot' : 'ok'}">${needing.length ? `${needing.length} of ${rows.length}` : 'all clear'}</span></div>
+      ${flat.length ? `<div class="mt8">${flat.map(({ r, s }) => `<div class="sig">
+          <span class="sig-dot sev${s.sev}"></span>
+          <div class="sig-tx"><div class="sig-t">${U.esc(r.prof.coachOf.athleteName)} — ${s.bare || s.title}</div>
+            <div class="sig-d">${s.detail}</div>
+            <button class="sig-act" data-a="co-open" data-id="${r.prof.id}">Open ${U.esc(r.prof.coachOf.athleteName.split(' ')[0])} ›</button></div>
+        </div>`).join('')}</div>`
+        : `<p class="muted mt8" style="font-size:13px;line-height:1.5">Nothing needs your attention today. Every athlete is training to plan — the best thing you can do is leave them to it.</p>`}
+      ${wins.length ? `<div class="sig-good-head">Worth saying out loud</div>
+        ${wins.slice(0, 4).map(({ r, s }) => `<div class="sig">
+          <span class="sig-dot sev1"></span>
+          <div class="sig-tx"><div class="sig-t">${U.esc(r.prof.coachOf.athleteName)} — ${s.bare || s.title}</div>
+            <div class="sig-d">${s.detail}</div>
+            <button class="sig-act" data-a="co-open" data-id="${r.prof.id}">Open ${U.esc(r.prof.coachOf.athleteName.split(' ')[0])} ›</button></div>
+        </div>`).join('')}` : ''}
+    </div>
+
+    ${needing.length ? `<div class="card"><h3>Flagged</h3><div class="mt8">${needing.map(card).join('')}</div></div>` : ''}
+    ${good.length ? `<div class="card"><h3>On track</h3><div class="mt8">${good.map(card).join('')}</div></div>` : ''}
+    ${rows.length ? '' : `<div class="card"><h3>No athletes yet</h3>
+      <p class="muted mt8">Pair someone from your profile, or load the demo squad to see how this looks with a full roster.</p></div>`}
+    <div style="height:70px"></div>
+  </div>`;
+}
+
 function renderCoachHome(prof) {
   const co = prof.coachOf;
   const pg = co.progress;
@@ -8251,8 +8851,9 @@ function renderCoachHome(prof) {
     : co.pendingPlanPush ? 'Changes ready to send…'
     : `Sent — waiting for ${U.esc(co.athleteName)} to tap Apply`;
   const myProf = Object.values(App.data.profiles).find(p => !p.isCoach);
+  const nClients = coachClients().length;
   return `<div class="screen">
-    ${myProf ? `<button class="switchback" data-a="co-myprofile">↩ Back to my training (${U.esc(myProf.name)})</button>` : ''}
+    ${nClients > 1 ? `<button class="switchback" data-a="co-roster">‹ All athletes (${nClients})</button>` : ''}
     <div class="hdr"><div><div class="hi">Coaching ${U.esc(co.athleteName)}</div><div class="sub">${U.esc(status)}</div></div>
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
     ${(() => { const pgp = pg && pg.program; const p = pgp && typeof pgp.n === 'number' ? pgp : prof.program;
@@ -8500,6 +9101,26 @@ function coachAction(a, el, prof) {
     App.data.activeProfileId = el.dataset.id;
     App.view = 'today'; closeSheet(); saveApp(); render();
     syncTick(true);
+    return true;
+  }
+  if (a === 'co-switch') { showSwitchSheet(prof); return true; }
+  if (a === 'co-roster') { App.view = 'roster'; App._scrollTop = true; closeSheet(); render(); return true; }
+  if (a === 'co-demo-load') {
+    const n = seedDemoSquad();
+    const first = coachClients()[0];
+    if (first) { App.data.activeProfileId = first.id; }
+    App.view = 'roster'; App._scrollTop = true; closeSheet(); saveApp(); render();
+    toast(n ? `Demo squad loaded — ${n} athletes` : 'Demo squad already loaded');
+    return true;
+  }
+  if (a === 'co-demo-clear') {
+    showConfirm('Remove the demo squad?', 'This deletes the seeded demo athletes only. Your own profile and any real clients stay exactly as they are.', 'Keep them', 'Remove', ok => {
+      if (!ok) {
+        const n = removeDemoSquad();
+        App.view = 'today'; App._scrollTop = true; render();
+        toast(`Removed ${n} demo ${U.plural(n, 'athlete')}`);
+      }
+    });
     return true;
   }
   if (a === 'co-focus-msg') {   // triage → jump to the message box

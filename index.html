@@ -301,6 +301,7 @@ textarea.ob-input { font-family: inherit; }   /* textareas default to monospace 
 .pvl-dot { color: var(--ink3); opacity: .5; }
 /* v3.20 — coach exception dashboard */
 .triage .tag.hot { background: #FDECEA; color: #B3261E; }
+.tag.ok { background: var(--good-bg); color: var(--good-text, #1B7F3B); font-weight: 800; }
 .triage .tag.ok { background: #E7F6E7; color: #1B7F3B; }
 [data-theme="dark"] .triage .tag.hot { background: rgba(224,110,100,0.16); color: #E8A9A2; }
 [data-theme="dark"] .triage .tag.ok { background: rgba(94,168,120,0.16); color: #9FD3B0; }
@@ -4739,6 +4740,244 @@ async function syncRpc(name, body) {
   return t && t !== 'null' ? JSON.parse(t) : null;
 }
 
+/* ============ v3.27 — accounts (magic link) ==============================
+   ADDITIVE. Signed out, nothing below runs and the app behaves exactly as it
+   did before: pair codes, local profiles, the same eight RPCs. Signing in adds
+   a server-side identity and a real roster on top.
+
+   No passwords anywhere — a one-time link by email is the whole flow, so there
+   is nothing to store, reset or leak. Tokens live in localStorage under
+   liftoff.auth; the access token is short-lived and refreshed on demand.       */
+const AUTH_KEY = 'liftoff.auth';
+const AUTH_SKEW_MS = 60 * 1000;   // refresh a minute early rather than racing expiry
+
+const LOAuth = {
+  sess: null,
+  _refreshing: null,
+
+  load() {
+    if (this.sess) return this.sess;
+    try {
+      const raw = localStorage.getItem(AUTH_KEY);
+      if (raw) this.sess = JSON.parse(raw);
+    } catch (e) { this.sess = null; }
+    return this.sess;
+  },
+  save(s) {
+    this.sess = s || null;
+    try { s ? localStorage.setItem(AUTH_KEY, JSON.stringify(s)) : localStorage.removeItem(AUTH_KEY); } catch (e) {}
+  },
+  signedIn() { const s = this.load(); return !!(s && s.refresh_token); },
+  email() { const s = this.load(); return (s && s.email) || ''; },
+  userId() { const s = this.load(); return (s && s.user_id) || ''; },
+
+  /* the app's own URL, minus any query or hash, so the link comes back here */
+  redirectTo() { return location.origin + location.pathname; },
+
+  async requestLink(email) {
+    const r = await fetch(SYNC_CFG.base + '/auth/v1/otp?redirect_to=' + encodeURIComponent(this.redirectTo()), {
+      method: 'POST',
+      headers: { apikey: SYNC_CFG.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: String(email || '').trim(), create_user: true }),
+    });
+    if (!r.ok) {
+      let msg = 'auth ' + r.status;
+      try { const j = await r.json(); msg = j.msg || j.error_description || j.message || msg; } catch (e) {}
+      throw new Error(msg);
+    }
+    return true;
+  },
+
+  /* Supabase returns the session in the URL fragment. Take it, store it, and
+     scrub the address bar so the tokens don't sit in history or get shared. */
+  captureFromUrl() {
+    const h = location.hash || '';
+    const hasToken = /access_token=/.test(h), hasErr = /error_description=/.test(h);
+    if (!hasToken && !hasErr) return null;
+    const p = new URLSearchParams(h.replace(/^#/, ''));
+    let out;
+    if (hasToken) {
+      const access = p.get('access_token'), refresh = p.get('refresh_token');
+      if (!access || !refresh) out = { error: 'That link was incomplete' };
+      else {
+        const claims = _jwtClaims(access);
+        // store BEFORE tidying the URL — replaceState throws under file:// and in
+        // some embedded webviews, and a cosmetic failure must never cost the session
+        this.save({
+          access_token: access, refresh_token: refresh,
+          expires_at: Date.now() + (+p.get('expires_in') || 3600) * 1000,
+          user_id: claims.sub || '', email: claims.email || '',
+        });
+        out = { ok: true, email: claims.email || '' };
+      }
+    } else {
+      out = { error: p.get('error_description') || 'That link didn’t work' };
+    }
+    try { history.replaceState(null, '', location.pathname + location.search); }
+    catch (e) { try { location.hash = ''; } catch (e2) { /* leave it — we have the session */ } }
+    return out;
+  },
+
+  async token() {
+    const s = this.load();
+    if (!s || !s.refresh_token) return null;
+    if (s.access_token && s.expires_at && Date.now() < s.expires_at - AUTH_SKEW_MS) return s.access_token;
+    if (this._refreshing) return this._refreshing;
+    this._refreshing = (async () => {
+      try {
+        const r = await fetch(SYNC_CFG.base + '/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          headers: { apikey: SYNC_CFG.key, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: s.refresh_token }),
+        });
+        if (!r.ok) {
+          // a rejected refresh token is gone for good — sign out rather than loop
+          if (r.status === 400 || r.status === 401) this.save(null);
+          return null;
+        }
+        const j = await r.json();
+        const claims = _jwtClaims(j.access_token || '');
+        this.save({
+          access_token: j.access_token, refresh_token: j.refresh_token || s.refresh_token,
+          expires_at: Date.now() + (+j.expires_in || 3600) * 1000,
+          user_id: claims.sub || s.user_id || '', email: claims.email || s.email || '',
+        });
+        return j.access_token;
+      } catch (e) { return null; }        // offline — the signed-out paths still work
+      finally { this._refreshing = null; }
+    })();
+    return this._refreshing;
+  },
+
+  async signOut() {
+    const s = this.load();
+    if (s && s.access_token) {
+      try {
+        await fetch(SYNC_CFG.base + '/auth/v1/logout', {
+          method: 'POST',
+          headers: { apikey: SYNC_CFG.key, Authorization: 'Bearer ' + s.access_token },
+        });
+      } catch (e) { /* revoking server-side is best-effort; the local wipe is what matters */ }
+    }
+    this.save(null);
+  },
+};
+
+/* read a JWT payload without verifying it — we only want sub/email for display;
+   the server is what actually trusts the token */
+function _jwtClaims(jwt) {
+  try {
+    const b = String(jwt).split('.')[1];
+    if (!b) return {};
+    const pad = '='.repeat((4 - b.length % 4) % 4);
+    return JSON.parse(decodeURIComponent(escape(atob((b + pad).replace(/-/g, '+').replace(/_/g, '/')))));
+  } catch (e) { return {}; }
+}
+
+/* an RPC as the signed-in user, so RLS applies. Returns null when signed out —
+   every caller treats that as "not available" and falls back to the pair path. */
+async function authRpc(name, body) {
+  const tok = await LOAuth.token();
+  if (!tok) return null;
+  const r = await fetch(SYNC_CFG.base + '/rest/v1/rpc/' + name, {
+    method: 'POST',
+    headers: { apikey: SYNC_CFG.key, Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  if (r.status === 401) { LOAuth.save(null); return null; }
+  if (!r.ok) throw new Error('auth rpc ' + r.status);
+  const t = await r.text();
+  return t && t !== 'null' ? JSON.parse(t) : null;
+}
+
+/* claim an existing pair code into this account — how a coach and athlete who
+   are already paired migrate without losing anything */
+async function claimPair(pairKey, as, name) {
+  const res = await authRpc('lo_claim_pair', { p_pair_key: pairKey, p_as: as, p_name: name || null });
+  return res || { ok: false, error: 'not_signed_in' };
+}
+async function fetchRoster() {
+  const res = await authRpc('lo_my_roster', {});
+  return res && res.ok ? res : null;
+}
+const CLAIM_MSG = {
+  no_such_pair: 'That code isn’t on the server any more',
+  already_claimed: 'Someone has already claimed that side of the link',
+  coach_has_not_claimed: 'Ask your coach to sign in first — they claim the link, then you join it',
+  cannot_coach_yourself: 'That’s your own coaching link',
+  not_signed_in: 'Sign in first',
+  bad_role: 'Something went wrong claiming that link',
+};
+
+/* Every local pair code this phone knows about, with which side we are on.
+   Signing in adopts them all, so a coach who already has clients keeps them. */
+function localPairs() {
+  const out = [];
+  for (const p of Object.values(App.data.profiles || {})) {
+    if (p.demo) continue;
+    if (p.isCoach && p.coachOf && p.coachOf.key) {
+      out.push({ key: p.coachOf.key, as: 'coach', name: p.coachOf.athleteName || p.name, profId: p.id });
+    } else if (p.coachSync && p.coachSync.key) {
+      out.push({ key: p.coachSync.key, as: 'athlete', name: p.name, profId: p.id });
+    }
+  }
+  return out;
+}
+
+/* run once after a successful sign-in: adopt what this phone already has, then
+   pull the roster back down. Silent on failure — the app works signed out. */
+async function afterSignIn() {
+  const pairs = localPairs();
+  let claimed = 0, failed = 0;
+  for (const p of pairs) {
+    try { const r = await claimPair(p.key, p.as, p.name); r && r.ok ? claimed++ : failed++; }
+    catch (e) { failed++; }
+  }
+  try { App.roster = await fetchRoster(); } catch (e) { App.roster = null; }
+  App.rosterAt = Date.now();
+  saveApp(); render();
+  if (claimed) toast(`Linked ${claimed} ${U.plural(claimed, 'connection')} to your account`);
+  else if (failed && pairs.length) toast('Signed in — couldn’t link this phone’s codes yet');
+}
+
+async function refreshRoster(force) {
+  if (!LOAuth.signedIn()) { App.roster = null; return null; }
+  if (!force && App.rosterAt && Date.now() - App.rosterAt < 30000) return App.roster;
+  try { App.roster = await fetchRoster(); App.rosterAt = Date.now(); } catch (e) { /* offline */ }
+  return App.roster;
+}
+
+/* ---- the account card, on Profile ---- */
+function accountCardHtml(prof) {
+  const inn = LOAuth.signedIn();
+  if (!inn) {
+    return `<div class="card">
+      <h3>Account</h3>
+      <p class="muted mt8">Sign in and your coaching links live on the server instead of only on this phone — so a new phone, or a lost one, doesn’t take your roster with it.</p>
+      <p class="muted mt8" style="font-size:12px;line-height:1.5">No password. We email you a link, you tap it, you’re in. Everything keeps working exactly as it does now while you’re signed out.</p>
+      <input class="ob-input" id="auth-email" type="email" inputmode="email" autocomplete="email"
+        placeholder="you@example.com" style="margin-top:10px;font-size:15px;font-weight:600;padding:12px">
+      <button class="btn primary block mt8" data-a="auth-link">Email me a sign-in link</button>
+    </div>`;
+  }
+  const r = App.roster;
+  const asCoach = (r && r.as_coach) || [], asAth = (r && r.as_athlete) || [];
+  return `<div class="card">
+    <div class="row"><h3>Account</h3><span class="spacer"></span><span class="tag ok">signed in</span></div>
+    <p class="muted mt8" style="font-size:13.5px;font-weight:700;color:var(--ink)">${U.esc(LOAuth.email())}</p>
+    ${r ? `<div class="muted mt8" style="font-size:12.5px;line-height:1.6">
+        ${asCoach.length ? `Coaching <b>${asCoach.length}</b> ${U.plural(asCoach.length, 'athlete')}${asCoach.some(c => !c.claimed) ? ` · ${asCoach.filter(c => !c.claimed).length} yet to join` : ''}` : 'No athletes on your roster yet'}
+        ${asAth.length ? `<br>Coached by <b>${U.esc((asAth[0] || {}).coach_name || 'someone')}</b>` : ''}
+      </div>`
+      : `<div class="muted mt8" style="font-size:12.5px">Roster not loaded — tap refresh, or check your connection.</div>`}
+    <div class="row mt8" style="gap:7px">
+      <button class="btn sm ghost" data-a="auth-roster">Refresh roster</button>
+      <button class="btn sm ghost" data-a="auth-signout">Sign out</button>
+    </div>
+    <p class="muted mt8" style="font-size:11.5px;line-height:1.45">Signing out leaves everything on this phone untouched — your training, plans and pair codes all stay put.</p>
+  </div>`;
+}
+
 /* ---------- rest-timer web push (server-scheduled) ----------
    iOS freezes a backgrounded PWA's JS, so a local notification can never fire
    while the phone is locked. Instead the app books a push with the sync server
@@ -5347,7 +5586,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.26.0';
+const APP_VERSION = '3.27.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -7713,6 +7952,7 @@ function renderProfileView(prof) {
         <div class="seg" style="margin:0;width:170px">${[10, 15, 20].map(v => `<button class="${(prof.barKg || 20) === v ? 'on' : ''}" data-a="set-barkg" data-v="${v}">${v}kg</button>`).join('')}</div>
       </div>
     </div>
+    ${accountCardHtml(prof)}
     <div class="card">
       <h3>Your data</h3>
       <div class="set-row"><div><div class="l">Back up</div><div class="d">Download everything as a file</div></div><button class="btn sm ghost" data-a="data-export">Export</button></div>
@@ -8167,6 +8407,28 @@ function dispatch(e) {
     try {
       Notification.requestPermission().then(p => { render(); toast(p === 'granted' ? 'Rest-timer pings are on' : 'No worries — the timer still works perfectly in the app'); });
     } catch (e) { toast('Notifications aren’t available on this phone'); }
+    return;
+  }
+  // ---- v3.27 accounts ----
+  if (a === 'auth-link') {
+    const el2 = document.getElementById('auth-email');
+    const email = (el2 ? el2.value : '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('That doesn’t look like an email address'); return; }
+    el.disabled = true; el.textContent = 'Sending…';
+    LOAuth.requestLink(email)
+      .then(() => toast('Check ' + email + ' — tap the link on this phone', 6000))
+      .catch(e => toast(/rate|429/i.test(e.message) ? 'Too many attempts — wait a minute' : 'Couldn’t send that: ' + e.message, 5000))
+      .finally(() => { el.disabled = false; el.textContent = 'Email me a sign-in link'; });
+    return;
+  }
+  if (a === 'auth-roster') {
+    el.disabled = true;
+    refreshRoster(true).then(r => { render(); toast(r ? 'Roster up to date' : 'Couldn’t reach the server'); })
+      .finally(() => { el.disabled = false; });
+    return;
+  }
+  if (a === 'auth-signout') {
+    LOAuth.signOut().finally(() => { App.roster = null; App.rosterAt = 0; render(); toast('Signed out — nothing on this phone changed'); });
     return;
   }
   if (a === 'data-export') { exportBackup(); toast('Backup downloaded'); return; }
@@ -10868,7 +11130,22 @@ document.body.addEventListener('input', e => {
 window.addEventListener('beforeunload', () => { if (_saveT) { clearTimeout(_saveT); Store.save(App.data); } });
 
 loadApp();
+// v3.27 — a magic link lands back here with the session in the URL fragment.
+// Grab it before the first render so the account state is right immediately.
+const _authLanding = (typeof LOAuth !== 'undefined') ? LOAuth.captureFromUrl() : null;
 render();
+function _handleAuthLanding(res) {
+  if (!res) return;
+  if (res.ok) { toast('Signed in as ' + (res.email || 'you')); afterSignIn(); }
+  else if (res.error) toast(res.error, 5000);
+}
+if (_authLanding) setTimeout(() => _handleAuthLanding(_authLanding), 400);
+// Tapping the link while the app is already open is a fragment-only navigation:
+// the page never reloads, so without this the sign-in would be silently ignored.
+window.addEventListener('hashchange', () => {
+  const res = LOAuth.captureFromUrl();
+  if (res) { render(); _handleAuthLanding(res); }
+});
 if (App.workout && App.workout.restEndTs && typeof resumeRest === 'function') resumeRest();
 
 // keep the day current: if the app is left open across midnight, refresh Today

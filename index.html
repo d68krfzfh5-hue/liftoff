@@ -347,6 +347,22 @@ textarea.ob-input { font-family: inherit; }   /* textareas default to monospace 
 @keyframes vnpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
 .vn-hint { font-size: 11.5px; color: var(--ink2); margin-top: 9px; }
 .vn-card .mt8 .vn:last-child { margin-bottom: 0; }
+/* v3.26 — pick a day to move a session to */
+.dm-targets { margin-top: 8px; }
+.dm-t { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; margin-bottom: 7px; padding: 11px 13px; border-radius: 12px; background: var(--fill); min-height: 48px; }
+.dm-t.free { background: var(--good-bg); }
+.dm-t:active { opacity: .65; }
+.dm-t-d { flex: none; font-size: 13.5px; font-weight: 800; min-width: 88px; }
+.dm-t-x { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-t-go { flex: none; font-size: 12px; font-weight: 800; color: var(--violet); }
+.dm-t.free .dm-t-go { color: var(--good); }
+.dm-opt { display: block; width: 100%; text-align: left; padding: 13px 15px; border-radius: 14px; background: var(--fill); }
+.dm-opt.warn { background: var(--warn-bg); }
+.dm-opt:active { opacity: .65; }
+.dm-opt-h { display: block; font-size: 15px; font-weight: 900; }
+.dm-opt-b { display: block; margin-top: 5px; font-size: 12.5px; line-height: 1.5; color: var(--ink2); }
+.wk-day .wk-act.mv { color: var(--violet); font-weight: 900; }
+.wk-mv { margin-left: 7px; font-size: 11px; font-weight: 800; color: var(--violet); white-space: nowrap; }
 .cwx-vn { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 8px; padding: 8px 11px; border-radius: 10px; background: var(--coach-bg); color: var(--violet); font-size: 12px; font-weight: 800; min-height: 36px; }
 .cwx-vn svg { width: 14px; height: 14px; }
 .cwx-vn:active { opacity: .6; }
@@ -815,7 +831,8 @@ a.vid-retry { text-decoration: none; display: inline-block; }
   font-weight: 800; font-size: 14px; padding: 10px; border: none; }
 .step.holdgo.running { background: var(--grad); animation: pulse 1s ease infinite; }
 .trim-link { background: none; border: none; color: var(--brand-ink); font-weight: 800; font-size: 13px;
-  text-decoration: underline; text-underline-offset: 3px; opacity: 0.92; padding: 6px 0 0; cursor: pointer; }
+  text-decoration: underline; text-underline-offset: 3px; opacity: 0.92; padding: 8px 0 4px; cursor: pointer;
+  min-height: 32px; }
 .pr-banner.badgeb { background: linear-gradient(135deg, #FF7A1A, #FFB020); box-shadow: 0 6px 18px rgba(255, 140, 20, 0.35); }
 /* badges */
 .badges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
@@ -4039,55 +4056,125 @@ function workoutForWeekdayInWeek(prof, wd, weekKey) {
 }
 function workoutForWeekday(prof, wd) { return workoutForWeekdayInWeek(prof, wd, weekKeyThis()); }
 
-/* ============ day moves — "can't make it" reschedules, THIS WEEK only ============
+/* ============ day moves — reschedules and swaps, on ANY week ============
    prof.dayMoves = { [mondayISO]: { [fromWd]: { to: wd|null, note, ts, by, cleared } } }
    - to: another weekday = moved there; null = skipped for the week.
    - cleared: an undo tombstone (kept so the undo syncs across; treated as "no move").
    - by: 'athlete' | 'coach' — athlete entries travel in the progress doc, coach
      entries in the plan doc; on receive, newest ts wins per (week, day).
-   The weekly plan template is never touched — next week runs as normal. */
+   A SWAP is just two mutual entries (a→b and b→a), so it needs no new shape and
+   merges across devices with the same newest-ts-wins rule.
+   The weekly plan template is never touched by a move — "make it permanent"
+   (v3.26) is a separate, explicit step that rewrites weekSchedule + dayMap. */
+const DM_KEEP_AHEAD = 8;   // weeks of planned-ahead moves kept before pruning
 function ensureDayMoves(p) { if (!p.dayMoves || typeof p.dayMoves !== 'object') p.dayMoves = {}; return p.dayMoves; }
-function _prevWeekKey(wk) { const d = U.parseISO(wk); d.setDate(d.getDate() - 7); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function _prevWeekKey(wk) { const d = U.parseISO(wk); d.setDate(d.getDate() - 7); return _isoOf(d); }
+function _weekKeyPlus(wk, n) { const d = U.parseISO(wk); d.setDate(d.getDate() + 7 * n); return _isoOf(d); }
 function pruneDayMoves(p) {
   const dm = ensureDayMoves(p);
-  const wk = U.weekKey(U.todayISO()), prev = _prevWeekKey(wk);
-  for (const k of Object.keys(dm)) if (k !== wk && k !== prev) delete dm[k];
+  const wk = weekKeyThis(), prev = _prevWeekKey(wk), horizon = _weekKeyPlus(wk, DM_KEEP_AHEAD);
+  // ISO date strings sort chronologically, so a range test is enough
+  for (const k of Object.keys(dm)) if (k < prev || k > horizon) delete dm[k];
 }
-function setDayMove(p, fromWd, toWd, note, by) {
+function setDayMove(p, fromWd, toWd, note, by, wk) {
   pruneDayMoves(p);
-  const wk = U.weekKey(U.todayISO()), dm = ensureDayMoves(p);
-  (dm[wk] = dm[wk] || {})[fromWd] = {
+  const key = wk || weekKeyThis(), dm = ensureDayMoves(p);
+  (dm[key] = dm[key] || {})[fromWd] = {
     to: toWd == null ? null : U.clamp(+toWd, 0, 6),
     note: String(note || '').slice(0, 140), ts: Date.now(), by: by === 'coach' ? 'coach' : 'athlete',
   };
 }
-function clearDayMove(p, fromWd, by) {
-  const wk = U.weekKey(U.todayISO()), dm = ensureDayMoves(p);
-  if (dm[wk] && dm[wk][fromWd]) dm[wk][fromWd] = { cleared: true, to: null, note: '', ts: Date.now(), by: by === 'coach' ? 'coach' : 'athlete' };
+/* exchange two days: each one's session takes the other's slot */
+function setDaySwap(p, a, b, note, by, wk) {
+  setDayMove(p, a, b, note, by, wk);
+  setDayMove(p, b, a, note, by, wk);
 }
-function movesThisWeek(p) {
-  const dm = (p.dayMoves || {})[U.weekKey(U.todayISO())] || {};
+/* move A onto B and drop what was already on B (an explicit skip, so it's
+   visible and undoable rather than silently disappearing) */
+function setDayReplace(p, a, b, note, by, wk) {
+  setDayMove(p, a, b, note, by, wk);
+  setDayMove(p, b, null, note, by, wk);
+}
+/* v3.26 — make a swap stick: rewrite the standard week so it applies from this
+   week onwards. Weeks between now and the chosen one keep their old shape via
+   an explicit counter-swap — a swap is its own inverse, so that's all it takes. */
+function applyDaySwapToPlan(p, a, b) {
+  const q = p.quiz || (p.quiz = {});
+  const sched = q.weekSchedule || (q.weekSchedule = {});
+  const swap = (o, x, y) => { if (!o) return; const ox = o[x], oy = o[y];
+    if (oy === undefined) delete o[x]; else o[x] = oy;
+    if (ox === undefined) delete o[y]; else o[y] = ox; };
+  swap(sched, a, b);
+  if (p.plan) {
+    swap(p.plan.dayMap, a, b);      // which workout sits on which day
+    swap(p.plan.cardio, a, b);      // a run's prescription travels with its day
+  }
+}
+function makeSwapPermanent(p, a, b, fromWk, by) {
+  const cur = weekKeyThis();
+  let wk = cur, guard = 0;
+  while (wk < fromWk && guard++ < 60) { setDaySwap(p, a, b, '', by, wk); wk = _weekKeyPlus(wk, 1); }
+  applyDaySwapToPlan(p, a, b);
+  clearDayMove(p, a, by, fromWk);   // the template now says it — drop the one-off
+}
+function clearDayMove(p, fromWd, by, wk) {
+  const key = wk || weekKeyThis(), dm = ensureDayMoves(p);
+  const stamp = () => ({ cleared: true, to: null, note: '', ts: Date.now(), by: by === 'coach' ? 'coach' : 'athlete' });
+  if (!dm[key] || !dm[key][fromWd]) return;
+  const partner = dm[key][fromWd].to;   // undoing half a swap would strand the other half
+  dm[key][fromWd] = stamp();
+  if (partner != null && dm[key][partner] && +dm[key][partner].to === +fromWd) dm[key][partner] = stamp();
+}
+function movesInWeek(p, wk) {
+  const dm = (p.dayMoves || {})[wk || weekKeyThis()] || {};
   const out = {};
   for (const [wd, e] of Object.entries(dm)) if (e && !e.cleared) out[+wd] = e;
   return out;
 }
-function moveTargetsThisWeek(p) { // wd → the weekday whose session moved here
-  const mv = movesThisWeek(p), t = {};
+function movesThisWeek(p) { return movesInWeek(p, weekKeyThis()); }
+function moveTargetsInWeek(p, wk) { // wd → the weekday whose session moved here
+  const mv = movesInWeek(p, wk), t = {};
   for (const [from, e] of Object.entries(mv)) if (e.to != null && +e.to !== +from) t[+e.to] = +from;
   return t;
 }
-function effActivityOn(p, wd) { // activityOn with this week's moves applied
+function moveTargetsThisWeek(p) { return moveTargetsInWeek(p, weekKeyThis()); }
+function effActivityOnIn(p, wd, wk) { // activityOn with that week's moves applied
   const base = activityOn(p, wd);
   if (base == null) return base;
-  if (moveTargetsThisWeek(p)[wd] != null) return 'lift';
-  if (movesThisWeek(p)[wd]) return 'rest'; // its session moved away or was skipped
+  const src = moveTargetsInWeek(p, wk)[wd];
+  if (src != null) return activityOn(p, src) || 'lift';   // a moved run stays a run
+  if (movesInWeek(p, wk)[wd]) return 'rest';              // its session moved away or was skipped
   return base;
 }
-function effWorkoutForWeekday(p, wd) {
-  const src = moveTargetsThisWeek(p)[wd];
-  if (src != null) return workoutForWeekday(p, src);
-  if (movesThisWeek(p)[wd]) return null;
-  return workoutForWeekday(p, wd);
+function effActivityOn(p, wd) { return effActivityOnIn(p, wd, weekKeyThis()); }
+function effWorkoutForWeekdayIn(p, wd, wk) {
+  const key = wk || weekKeyThis();
+  const src = moveTargetsInWeek(p, key)[wd];
+  if (src != null) return workoutForWeekdayInWeek(p, src, key);
+  if (movesInWeek(p, key)[wd]) return null;
+  return workoutForWeekdayInWeek(p, wd, key);
+}
+function effWorkoutForWeekday(p, wd) { return effWorkoutForWeekdayIn(p, wd, weekKeyThis()); }
+/* a cardio day that moved carries its prescription with it */
+function effCardioSpecFor(p, wd, wk) {
+  const key = wk || weekKeyThis();
+  const src = moveTargetsInWeek(p, key)[wd];
+  if (src != null) return cardioSpecFor(p, src);
+  if (movesInWeek(p, key)[wd]) return null;
+  return cardioSpecFor(p, wd);
+}
+/* what actually sits on a day, whatever kind it is — used by the swap UI */
+function daySlotLabel(p, wd, wk) {
+  const act = effActivityOnIn(p, wd, wk) || 'rest';
+  if (act === 'rest') return { act, name: 'Rest', sub: '' };
+  if (act === 'lift') {
+    const w4 = effWorkoutForWeekdayIn(p, wd, wk);
+    return w4 ? { act, name: w4.name, sub: `${w4.exercises.length} exercises · ~${estMinutes({ exercises: w4.exercises })} min` }
+              : { act, name: 'Lift', sub: '' };
+  }
+  const spec = effCardioSpecFor(p, wd, wk);
+  return { act, name: spec ? cardioLabel(p, spec) : sportLabelFor(p, act),
+           sub: spec ? (cardioTargetLine(p, spec) || '') : 'Nothing prescribed yet' };
 }
 /* next lift from today inclusive, move-aware inside this week; beyond Sunday the
    base schedule applies (moves never carry into next week) */
@@ -5260,7 +5347,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.25.0';
+const APP_VERSION = '3.26.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6094,7 +6181,7 @@ function showDayPeekSheet(prof, d) {
         </div>
         ${when === 'today' && !isCoach
           ? `<button class="btn primary block mt12" data-a="${w4d.type === 'custom' ? 'start-custom' : 'start-workout'}" ${w4d.type === 'custom' ? `data-id="${w4d.id}"` : `data-idx="${w4d.idx}"`}>Start workout</button>`
-          : `<button class="btn ghost block mt12" data-a="dm-day-open" data-from="${mvHere != null ? mvHere : d}">${isCoach ? 'Move or skip this day' : when === 'past' ? 'Life happened? Move or skip it' : 'Can’t make it? Move or skip'}</button>`}
+          : `<button class="btn ghost block mt12" data-a="dm-day-open" data-from="${mvHere != null ? mvHere : d}" data-wk="${weekKeyThis()}">⇄ ${isCoach ? 'Move this day to another day' : when === 'past' ? 'Life happened? Move or skip it' : 'Can’t make it? Swap or skip'}</button>`}
         ${(prof.quiz.weekSchedule || {})[d] === 'lift' && prof.plan ? `<button class="btn ghost block mt8" data-a="day-override-open" data-d="${d}">Swap this day’s workout</button>` : ''}`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
@@ -6157,15 +6244,17 @@ function showNextWeekDaySheet(prof, d) {
   const dt = new Date(mon); dt.setDate(mon.getDate() + 7 + d);   // same weekday, next week
   const iso = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
   const u = prof.units;
-  const act = activityOn(prof, d) || 'rest';   // base schedule — moves don't carry into next week
+  const act = effActivityOnIn(prof, d, weekKeyNext()) || 'rest';   // v3.26 — next week can be moved around too
   let body;
+  const mvSrcN = moveTargetsInWeek(prof, weekKeyNext())[d];
+  const mvEN = movesInWeek(prof, weekKeyNext())[d];
   if (act === 'lift') {
-    const w4d = workoutForWeekdayInWeek(prof, d, weekKeyNext());
+    const w4d = effWorkoutForWeekdayIn(prof, d, weekKeyNext());
     if (w4d) {
       const day = { name: w4d.name, exercises: w4d.exercises };
       const isOv = !!w4d.override;
-      const canEdit = w4d.type === 'plan';   // athlete edits her own; coach edits the client's plan.weekPlan
-      body = `<div style="font-weight:800;font-size:14.5px">Coming up next week${isOv ? ' <span class="tag hot" style="vertical-align:2px">adjusted</span>' : ''}</div>
+      const canEdit = w4d.type === 'plan' && mvSrcN == null;   // athlete edits her own; coach edits the client's plan.weekPlan
+      body = `<div style="font-weight:800;font-size:14.5px">Coming up next week${isOv ? ' <span class="tag hot" style="vertical-align:2px">adjusted</span>' : ''}${mvSrcN != null ? ` <span class="wk-mv">↷ moved from ${WEEKDAYS[mvSrcN]}</span>` : ''}</div>
         <div class="muted" style="font-size:12.5px;margin-top:2px">${U.esc(day.name)} · ${day.exercises.length} exercises · ~${estMinutes(day)} min</div>
         ${canEdit ? `<button class="btn primary block mt12" data-a="nextweek-edit" data-d="${d}">Edit next week’s workout ›</button>` : ''}
         ${canEdit && isOv ? `<button class="btn ghost block mt8" data-a="nextweek-revert" data-idx="${w4d.idx}">Revert to standard plan</button>` : ''}
@@ -6180,31 +6269,48 @@ function showNextWeekDaySheet(prof, d) {
         <div class="muted mt12" style="font-size:12px;line-height:1.5">Weights are projected from your recent lifts — they fine-tune as you log this week.</div>`;
     } else body = `<p class="muted">Nothing planned here.</p>`;
   } else if (act !== 'rest') {
-    body = `<div style="font-weight:800;font-size:14.5px">${IC(ACTIVITIES[act].emoji)} ${U.esc(sportLabelFor(prof, act))}</div>
+    const specN = effCardioSpecFor(prof, d, weekKeyNext());
+    body = `<div style="font-weight:800;font-size:14.5px">${IC(ACTIVITIES[act].emoji)} ${U.esc(specN ? cardioLabel(prof, specN) : sportLabelFor(prof, act))}${mvSrcN != null ? ` <span class="wk-mv">↷ moved from ${WEEKDAYS[mvSrcN]}</span>` : ''}</div>
+      ${specN && cardioTargetLine(prof, specN) ? `<div class="cq-target">Target · ${U.esc(cardioTargetLine(prof, specN))}</div>` : ''}
       <div class="muted mt8" style="font-size:13px">On the plan — the lifting schedule works around it.</div>`;
   } else {
-    body = `<div style="font-weight:800;font-size:14.5px">Rest day</div>
-      <div class="muted mt8" style="font-size:13px">Recovery is where the muscles are built. Eat well, sleep well.</div>`;
+    body = `<div style="font-weight:800;font-size:14.5px">${mvEN ? (mvEN.to == null ? 'Skipped that week' : `Moved to ${WEEKDAYS_FULL[mvEN.to]}`) : 'Rest day'}</div>
+      <div class="muted mt8" style="font-size:13px">${mvEN ? 'The standard plan is untouched — this is next week only.' : 'Recovery is where the muscles are built. Eat well, sleep well.'}</div>`;
   }
   showSheet(`<h3 style="font-size:19px;font-weight:900">${WEEKDAYS_FULL[d]} <span class="muted" style="font-size:13px;font-weight:600">· next week · ${U.fmtDateShort(iso)}</span></h3>
     <div class="mt12">${body}</div>
-    <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
+    ${act !== 'rest' || mvEN ? `<button class="btn ghost block mt12" data-a="dm-day-open" data-from="${mvSrcN != null ? mvSrcN : d}" data-wk="${weekKeyNext()}">⇄ Move this day to another day</button>` : ''}
+    <button class="btn ghost block mt8" data-a="sheet-close">Close</button>`);
 }
 
-/* one-liner summary of this week's reschedules, e.g. "Tue → Thu (you) · Fri skipped (Coach)" */
+/* summary of reschedules, e.g. "Tue → Thu (you) · Fri skipped (Coach)".
+   v3.26 — covers next week too, since swaps can now be made ahead. A mutual
+   pair reads as one swap rather than two confusing one-way moves. */
 function dayMoveSummaryHtml(prof) {
-  const mv = movesThisWeek(prof);
-  const wds = Object.keys(mv).map(Number).sort((a, b) => a - b);
-  if (!wds.length) return '';
   const isCoach = !!prof.isCoach;
   const who = e => e.by === 'athlete'
     ? (isCoach ? U.esc((prof.coachOf && prof.coachOf.athleteName) || 'them') : 'you')
     : (isCoach ? 'you' : U.esc(prof.coachName || 'coach'));
-  const bits = wds.map(d => {
-    const e = mv[d];
-    return `<b>${WEEKDAYS[d]}</b> ${e.to == null ? 'skipped' : '→ ' + WEEKDAYS[e.to]} (${who(e)})${e.note ? ` · “${U.esc(e.note)}”` : ''}`;
-  });
-  return `<div class="muted mt8" style="font-size:12px;line-height:1.55">This week: ${bits.join(' · ')}</div>`;
+  const lineFor = wk => {
+    const mv = movesInWeek(prof, wk);
+    const wds = Object.keys(mv).map(Number).sort((a, b) => a - b);
+    if (!wds.length) return '';
+    const seen = new Set(), bits = [];
+    for (const d of wds) {
+      if (seen.has(d)) continue;
+      const e = mv[d];
+      const partner = e.to != null && mv[e.to] && +mv[e.to].to === d ? e.to : null;
+      if (partner != null) { seen.add(d); seen.add(partner);
+        bits.push(`<b>${WEEKDAYS[d]}</b> ⇄ <b>${WEEKDAYS[partner]}</b> (${who(e)})${e.note ? ` · “${U.esc(e.note)}”` : ''}`);
+      } else { seen.add(d);
+        bits.push(`<b>${WEEKDAYS[d]}</b> ${e.to == null ? 'skipped' : '→ ' + WEEKDAYS[e.to]} (${who(e)})${e.note ? ` · “${U.esc(e.note)}”` : ''}`);
+      }
+    }
+    return bits.join(' · ');
+  };
+  const rows = [['This week', lineFor(weekKeyThis())], ['Next week', lineFor(weekKeyNext())]].filter(r => r[1]);
+  if (!rows.length) return '';
+  return `<div class="muted mt8" style="font-size:12px;line-height:1.55">${rows.map(([l, b]) => `${l}: ${b}`).join('<br>')}</div>`;
 }
 
 /* the next gym session from today INCLUSIVE (startI=1 skips today, used once
@@ -7238,7 +7344,7 @@ function renderPlanView(prof) {
       </div>
       <div class="muted mt8" style="font-size:11.5px">Tap a day to see it — done, planned, or coming up. Swapping workouts lives in there too.</div>
       ${dayMoveSummaryHtml(prof)}
-      <button class="btn sm ghost mt8" data-a="dm-adjust-open">Life happened? Adjust this week</button>
+      <button class="btn sm ghost mt8" data-a="dm-adjust-open">⇄ Can’t make a day? Swap it</button>
     </div>` : '';
   const coachOf = prof.isCoach && prof.coachOf;
   return `<div class="screen">
@@ -9553,22 +9659,29 @@ function showWeekSheet(prof, wk) {
     } else {
       // v3.24 — every upcoming day is editable straight from the overview: no
       // more "open the session, close everything, come back in" to change a day.
-      const w4 = act === 'lift' ? workoutForWeekdayInWeek(prof, d, wk) : null;
-      const spec = act !== 'lift' && act !== 'rest' ? cardioSpecFor(prof, d) : null;
+      // v3.26 — and it now reflects that week's moves, with ⇄ to move the day.
+      const eAct = effActivityOnIn(prof, d, wk) || 'rest';
+      const mvE = movesInWeek(prof, wk)[d];
+      const mvSrc = moveTargetsInWeek(prof, wk)[d];
+      const w4 = eAct === 'lift' ? effWorkoutForWeekdayIn(prof, d, wk) : null;
+      const spec = eAct !== 'lift' && eAct !== 'rest' ? effCardioSpecFor(prof, d, wk) : null;
       const scope = when === 'next' ? 'nextweek' : 'plan';
+      const moved = mvSrc != null ? `<span class="wk-mv">↷ from ${WEEKDAYS[mvSrc]}</span>`
+        : mvE && mvE.to == null ? '<span class="wk-mv">⊘ skipped</span>'
+        : mvE ? `<span class="wk-mv">↷ to ${WEEKDAYS[mvE.to]}</span>` : '';
       const sub = w4 ? `${w4.exercises.length} exercises · ~${estMinutes({ exercises: w4.exercises })} min`
         : spec ? (cardioTargetLine(prof, spec) || cardioLabel(prof, spec))
-        : act === 'rest' ? 'Nothing scheduled' : '';
-      rows.push(`<div class="wk-day wk-edit${act === 'rest' ? ' d-rest' : ''}">
+        : eAct === 'rest' ? (mvE ? 'Moved off this day' : 'Nothing scheduled') : '';
+      rows.push(`<div class="wk-day wk-edit${eAct === 'rest' ? ' d-rest' : ''}">
         <button class="wk-day-main" data-a="${when === 'next' ? 'nextweek-peek' : 'day-peek'}" data-d="${d}">
           <span class="wk-day-d">${WEEKDAYS[d]}</span>
-          <span class="wk-day-tx"><span class="nm">${w4 ? U.esc(w4.name) : spec ? U.esc(cardioLabel(prof, spec)) : act === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, act))}</span>
+          <span class="wk-day-tx"><span class="nm">${w4 ? U.esc(w4.name) : spec ? U.esc(cardioLabel(prof, spec)) : eAct === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, eAct))}${moved}</span>
             ${sub ? `<span class="mt${spec ? ' wk-cd' : ''}">${sub}</span>` : ''}</span>
         </button>
         <span class="wk-day-acts">
-          ${w4 ? `<button class="wk-act" data-a="wk-editday" data-d="${d}" data-scope="${scope}" title="Edit this workout">${IC('edit')}</button>
-                  <button class="wk-act" data-a="wk-swapday" data-d="${d}" data-wk="${wk}" title="Swap or change this day">${IC('swap')}</button>`
-            : `<button class="wk-act" data-a="wk-swapday" data-d="${d}" data-wk="${wk}" title="Change this day">${act === 'rest' ? '+' : IC('edit')}</button>`}
+          ${eAct !== 'rest' || mvE ? `<button class="wk-act mv" data-a="dm-day-open" data-from="${mvSrc != null ? mvSrc : d}" data-wk="${wk}" title="Move this day to another day">⇄</button>` : ''}
+          ${w4 ? `<button class="wk-act" data-a="wk-editday" data-d="${d}" data-scope="${scope}" title="Edit this workout">${IC('edit')}</button>` : ''}
+          <button class="wk-act" data-a="wk-swapday" data-d="${d}" data-wk="${wk}" title="${w4 ? 'Change what this day is' : eAct === 'rest' ? 'Add something here' : 'Change this day'}">${eAct === 'rest' ? '+' : IC('swap')}</button>
         </span>
       </div>`);
     }
@@ -9579,7 +9692,7 @@ function showWeekSheet(prof, wk) {
     ${prov ? `<div class="wk-prov t-${prov.tone}" style="margin-top:8px">${prov.label}</div>` : ''}
     ${when === 'past' && sum.vol ? `<div class="muted mt8" style="font-size:12.5px">${Math.round(sum.vol).toLocaleString()} ${U.unitLabel(src.units)} total volume · ${sum.mins} min${sum.prs ? ` · ${sum.prs} new best${sum.prs > 1 ? 's' : ''}` : ''}</div>` : ''}
     <div class="mt12">${rows.join('')}</div>
-    ${when !== 'past' ? `<div class="muted mt8" style="font-size:11.5px;line-height:1.45">Tap a day to preview it, ${IC('edit')} to edit the session, or ${IC('swap')} to change what that day is.</div>` : ''}
+    ${when !== 'past' ? `<div class="muted mt8" style="font-size:11.5px;line-height:1.45">Tap a day to preview it, ⇄ to move it to another day, ${IC('edit')} to edit the session, or ${IC('swap')} to change what that day is.</div>` : ''}
     <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
 }
 
@@ -9618,6 +9731,10 @@ function showDaySwapSheet(prof, d, wk) {
     ${act !== 'lift' && act !== 'rest' ? `<div class="cq-lb" style="margin-top:16px">The session</div>
       <div class="cq-target">${spec ? (cardioTargetLine(prof, spec) || cardioLabel(prof, spec)) : 'Nothing prescribed yet'}</div>
       <button class="btn ${spec ? 'ghost' : 'primary'} block mt8" data-a="cd-open" data-d="${d}">${spec ? 'Edit the session ›' : 'Prescribe a session ›'}</button>` : ''}
+
+    ${act !== 'rest' ? `<div class="cq-lb" style="margin-top:16px">Can’t do it that day?</div>
+      <button class="btn ghost block mt8" data-a="dm-day-open" data-from="${d}" data-wk="${U.esc(wk)}">⇄ Move it to another day</button>
+      <p class="muted" style="font-size:11.5px;margin-top:7px;line-height:1.45">Moving is a one-off for that week. Changing what the day <i>is</i>, above, rewrites the plan itself.</p>` : ''}
 
     <button class="btn ghost block mt16" data-a="sheet-back">Done</button>`);
 }
@@ -9845,9 +9962,12 @@ function renderCoachHome(prof) {
         <button class="btn sm" style="background:var(--fill);color:var(--ink)" data-a="co-showcode">Pair code</button>
       </div>
     </div>
-    ${(() => { const s = dayMoveSummaryHtml(prof); return s ? `<div class="card">
-      <div class="row"><h3>This week's changes</h3></div>${s}
-      <button class="btn sm ghost mt8" data-a="dm-adjust-open">Adjust their week</button></div>` : ''; })()}
+    ${(() => { const s = dayMoveSummaryHtml(prof);
+      const who = U.esc((prof.coachOf || {}).athleteName || 'they');
+      return `<div class="card">
+      <div class="row"><h3>${s ? "This week's changes" : 'Life happened?'}</h3></div>
+      ${s || `<p class="tx">If ${who} can’t make a day, swap it with another one. It’s a one-off for that week unless you choose to make it stick.</p>`}
+      <button class="btn sm ghost mt8" data-a="dm-adjust-open">⇄ Swap or move a day</button></div>`; })()}
     <div class="card">
       <div class="row"><h3>Notes</h3><span class="spacer"></span>
         ${(() => { const n = threadSorted(prof).filter(x => x.from === 'athlete' && !x.seen).length;
@@ -10192,69 +10312,124 @@ function showThreadSheet(prof) {
 }
 
 /* ============ day moves — "life happened" reschedule/skip, both sides ============ */
-function _wdISOThisWeek(d) {
-  const mon = U.parseISO(U.weekKey(U.todayISO()));
+function _wdISOInWeek(wk, d) {
+  const mon = U.parseISO(wk || weekKeyThis());
   const dt = new Date(mon); dt.setDate(mon.getDate() + d);
-  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+  return _isoOf(dt);
 }
+function _wdISOThisWeek(d) { return _wdISOInWeek(weekKeyThis(), d); }
 function _dmLogs(prof) { // whose training log tells us a day is done
   return prof.isCoach ? ((prof.coachOf && prof.coachOf.progress && prof.coachOf.progress.logs) || []) : (prof.logs || []);
 }
 
-/* pick which session to adjust: every base lift day this week with its status */
-function showWeekAdjustSheet(prof) {
-  const sched = prof.quiz.weekSchedule || {};
-  const mv = movesThisWeek(prof);
+/* pick which session to adjust: every scheduled day in that week, with status */
+function showWeekAdjustSheet(prof, wk) {
+  const key = wk || weekKeyThis();
+  const isThis = key === weekKeyThis();
+  const mv = movesInWeek(prof, key);
   const logs = _dmLogs(prof);
   const t = todayWeekday();
   const isCoach = !!prof.isCoach;
   const rows = [];
   for (let d = 0; d < 7; d++) {
-    if ((sched[d] || 'rest') !== 'lift') continue;
-    const w4d = workoutForWeekday(prof, d);
+    if ((activityOn(prof, d) || 'rest') === 'rest' && mv[d] == null && moveTargetsInWeek(prof, key)[d] == null) continue;
+    const slot = daySlotLabel(prof, d, key);
     const e = mv[d];
     const effDay = e && e.to != null ? e.to : d;
-    const done = e && e.to == null ? false : logs.some(l => l.date === _wdISOThisWeek(effDay));
-    const status = done ? '✓ done' : e ? (e.to == null ? 'skipped' : `→ ${WEEKDAYS[e.to]} ↷`) : (d < t ? 'was planned' : d === t ? 'today' : 'planned');
-    rows.push(`<button class="prof-row" style="width:100%;text-align:left" data-a="dm-day-open" data-from="${d}" ${done ? 'disabled style="width:100%;text-align:left;opacity:.5"' : ''}>
-      <span class="em" style="border-radius:14px;font-size:17px">${done ? '' : e ? (e.to == null ? '' : '↷') : ''}</span>
+    const done = isThis && !(e && e.to == null) && logs.some(l => l.date === _wdISOInWeek(key, effDay));
+    const status = done ? '✓ done'
+      : e ? (e.to == null ? 'skipped' : `→ ${WEEKDAYS[e.to]} ↷`)
+      : (isThis ? (d < t ? 'was planned' : d === t ? 'today' : 'planned') : 'planned');
+    rows.push(`<button class="prof-row" style="width:100%;text-align:left" data-a="dm-day-open" data-from="${d}" data-wk="${U.esc(key)}" ${done ? 'disabled style="width:100%;text-align:left;opacity:.5"' : ''}>
+      <span class="em" style="border-radius:14px;font-size:17px">${done ? '✓' : e ? (e.to == null ? '⊘' : '↷') : ''}</span>
       <span style="flex:1;min-width:0"><div class="nm">${WEEKDAYS_FULL[d]}</div>
-      <div class="meta">${U.esc((w4d || {}).name || 'Lift')} · ${status}</div></span>
+      <div class="meta">${U.esc(slot.name)} · ${status}</div></span>
       ${done ? '' : '<span class="muted" style="font-size:18px">›</span>'}
     </button>`);
   }
-  showSheet(`<h3 style="font-size:19px;font-weight:900">Adjust this week</h3>
-    <p class="muted mt8" style="margin-bottom:10px">${isCoach ? `Move or skip one of ${U.esc((prof.coachOf || {}).athleteName || 'their')}’s sessions — this week only, the plan itself stays put.` : 'Can’t make a day? Move it or skip it — this week only, next week runs as normal.'}</p>
-    ${rows.join('') || '<p class="muted">No lift days on the schedule this week.</p>'}
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Move a day
+      <span class="muted" style="font-size:13px;font-weight:600">· ${weekBackLabel(prof, key)}</span></h3>
+    <p class="muted mt8" style="margin-bottom:10px">${isCoach ? `Pick one of ${U.esc((prof.coachOf || {}).athleteName || 'their')}’s days and swap it with another — the plan itself stays put unless you say otherwise.` : 'Pick a day you can’t make and swap it with another — the plan itself stays put unless you say otherwise.'}</p>
+    ${rows.join('') || '<p class="muted">Nothing scheduled that week.</p>'}
     <button class="btn ghost block mt8" data-a="sheet-close">Done</button>`);
 }
 
-/* move/skip one day: free-day targets + skip + optional note + undo */
-function showMoveDaySheet(prof, fromWd) {
+/* the day you're moving: every other day listed with what's on it, so a swap
+   is one tap whether the target is free or already has a session. */
+function showMoveDaySheet(prof, fromWd, wk) {
+  const key = wk || weekKeyThis();
+  const isThis = key === weekKeyThis();
   const isCoach = !!prof.isCoach;
   const t = todayWeekday();
-  const mv = movesThisWeek(prof);
+  const mv = movesInWeek(prof, key);
   const e = mv[fromWd];
-  const w4d = workoutForWeekday(prof, fromWd);
-  const name = (w4d || {}).name || 'this session';
-  const targets = [];
+  const from = daySlotLabel(prof, fromWd, key);
+  const rows = [];
   for (let d = 0; d < 7; d++) {
-    if (d === fromWd || d < t) continue;
-    if ((effActivityOn(prof, d) || 'rest') !== 'rest') continue;
-    targets.push(d);
+    if (d === fromWd) continue;
+    if (isThis && d < t) continue;               // can't move a session into the past
+    const to = daySlotLabel(prof, d, key);
+    const free = to.act === 'rest';
+    rows.push(`<button class="dm-t${free ? ' free' : ''}" data-a="dm-pick" data-from="${fromWd}" data-to="${d}" data-wk="${U.esc(key)}">
+      <span class="dm-t-d">${WEEKDAYS_FULL[d]}${isThis && d === t ? ' · today' : ''}</span>
+      <span class="dm-t-x">${free ? 'Free — nothing on' : U.esc(to.name)}</span>
+      <span class="dm-t-go">${free ? '↷ Move here' : '⇄ Swap'}</span>
+    </button>`);
   }
   const whoSees = isCoach
     ? `Syncs to ${U.esc((prof.coachOf || {}).athleteName || 'their')}’s phone — they’ll see it on their Today screen.`
-    : (prof.coachSync ? 'Your coach will see this, including your note.' : 'Just for this week — next week is untouched.');
-  showSheet(`<h3 style="font-size:19px;font-weight:900">${isCoach ? `Adjust ${WEEKDAYS_FULL[fromWd]}` : (fromWd === t ? 'Can’t train today?' : `Can’t make ${WEEKDAYS_FULL[fromWd]}?`)}</h3>
-    <p class="muted mt8" style="margin-bottom:4px"><b>${U.esc(name)}</b> · ${WEEKDAYS_FULL[fromWd]}${e ? (e.to == null ? ' · currently skipped' : ` · currently moved to ${WEEKDAYS_FULL[e.to]}`) : ''}</p>
+    : (prof.coachSync ? 'Your coach will see this, including your note.'
+       : `${isThis ? 'Just this week' : 'That week only'} — the plan itself is untouched.`);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${isCoach ? `Move ${WEEKDAYS_FULL[fromWd]}` : (isThis && fromWd === t ? 'Can’t train today?' : `Can’t make ${WEEKDAYS_FULL[fromWd]}?`)}
+      <span class="muted" style="font-size:13px;font-weight:600">· ${weekBackLabel(prof, key)}</span></h3>
+    <p class="muted mt8" style="margin-bottom:4px"><b>${U.esc(from.name)}</b> · ${WEEKDAYS_FULL[fromWd]}${e ? (e.to == null ? ' · currently skipped' : ` · currently moved to ${WEEKDAYS_FULL[e.to]}`) : ''}</p>
     <p class="muted" style="font-size:12px;margin-bottom:10px">${whoSees}</p>
-    <input class="ob-input" id="dm-note" maxlength="140" placeholder="Optional note — e.g. work ran over" autocomplete="off" style="margin-bottom:10px">
-    ${targets.length ? targets.map(d => `<button class="btn ghost block mt8" data-a="dm-move" data-from="${fromWd}" data-to="${d}">↷ Move to ${WEEKDAYS_FULL[d]}${d === t ? ' (today)' : ''}</button>`).join('')
-      : '<p class="muted" style="font-size:12.5px">No free days left this week to move it to — you can still skip it.</p>'}
-    <button class="btn block mt8" style="background:#FBE9E7;color:#C0302C" data-a="dm-skip" data-from="${fromWd}">Skip it this week</button>
-    ${e ? `<button class="btn ghost block mt8" data-a="dm-undo" data-from="${fromWd}">↩ Undo — back to ${WEEKDAYS_FULL[fromWd]}</button>` : ''}
-    <button class="btn ghost block mt8" data-a="sheet-close">Cancel</button>`);
+    <input class="ob-input" id="dm-note" maxlength="140" placeholder="Optional note — e.g. work ran over" autocomplete="off" style="margin-bottom:10px;font-size:14px;font-weight:500;padding:11px" value="${U.esc(App.dmNote || '')}">
+    <div class="cq-lb">Move it to</div>
+    <div class="dm-targets">${rows.join('') || '<p class="muted" style="font-size:12.5px">No days left this week — you can still skip it.</p>'}</div>
+    <button class="btn block mt12" style="background:var(--danger-bg);color:var(--danger)" data-a="dm-skip" data-from="${fromWd}" data-wk="${U.esc(key)}">Skip it ${isThis ? 'this week' : key === weekKeyNext() ? 'next week' : 'that week'}</button>
+    ${e ? `<button class="btn ghost block mt8" data-a="dm-undo" data-from="${fromWd}" data-wk="${U.esc(key)}">↩ Undo — back to ${WEEKDAYS_FULL[fromWd]}</button>` : ''}
+    <button class="btn ghost block mt8" data-a="dm-cancel">Cancel</button>`);
+  const n = document.getElementById('dm-note');
+  if (n) n.addEventListener('input', () => { App.dmNote = n.value; });
+}
+
+/* the target already has a session on it — exchange the two, or drop theirs? */
+function showSwapChoiceSheet(prof, a, b, wk) {
+  const key = wk || weekKeyThis();
+  const A = daySlotLabel(prof, a, key), B = daySlotLabel(prof, b, key);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${WEEKDAYS_FULL[b]} already has a session</h3>
+    <p class="muted mt8" style="margin-bottom:12px">Both days are booked, so this is a choice rather than a straight move.</p>
+
+    <button class="dm-opt" data-a="dm-swap" data-from="${a}" data-to="${b}" data-wk="${U.esc(key)}">
+      <span class="dm-opt-h">⇄ Swap them</span>
+      <span class="dm-opt-b"><b>${U.esc(A.name)}</b> moves to ${WEEKDAYS_FULL[b]}, and <b>${U.esc(B.name)}</b> comes back to ${WEEKDAYS_FULL[a]}. Both still get done.</span>
+    </button>
+
+    <button class="dm-opt warn mt8" data-a="dm-replace" data-from="${a}" data-to="${b}" data-wk="${U.esc(key)}">
+      <span class="dm-opt-h">→ Replace it</span>
+      <span class="dm-opt-b"><b>${U.esc(A.name)}</b> takes ${WEEKDAYS_FULL[b]} and <b>${U.esc(B.name)}</b> is skipped. One session fewer that week.</span>
+    </button>
+
+    <button class="btn ghost block mt12" data-a="sheet-back">Back</button>`);
+}
+
+/* done — offer to make it stick, since a repeating clash usually is repeating */
+function showMoveDoneSheet(prof, a, b, wk, kind) {
+  const key = wk || weekKeyThis();
+  const A = daySlotLabel(prof, a, key), B = daySlotLabel(prof, b, key);
+  const from = key === weekKeyThis() ? 'this week' : `the week of ${weekRangeLabel(key)}`;
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${kind === 'swap' ? 'Swapped' : 'Moved'} ✓</h3>
+    <p class="muted mt8" style="margin-bottom:12px">${kind === 'swap'
+      ? `<b>${U.esc(B.name)}</b> is on ${WEEKDAYS_FULL[b]} and <b>${U.esc(A.name)}</b> is on ${WEEKDAYS_FULL[a]} — ${from} only.`
+      : `<b>${U.esc(B.name)}</b> now sits on ${WEEKDAYS_FULL[b]} — ${from} only.`}</p>
+
+    <button class="dm-opt" data-a="dm-perm" data-from="${a}" data-to="${b}" data-wk="${U.esc(key)}">
+      <span class="dm-opt-h">Make it permanent</span>
+      <span class="dm-opt-b">${WEEKDAYS_FULL[a]} and ${WEEKDAYS_FULL[b]} swap on the standard week, from ${from} onwards. Weeks before that keep their current shape.</span>
+    </button>
+
+    <button class="btn primary block mt12" data-a="sheet-close">Just ${from}</button>`);
 }
 
 function dmAction(a, el, prof) {
@@ -10266,29 +10441,74 @@ function dmAction(a, el, prof) {
     saveApp(); render();
     toast(msg);
   };
+  const wkOf = () => el.dataset.wk || weekKeyThis();
+  const synced = () => prof.isCoach ? ' · syncing to their phone' : prof.coachSync ? ' · your coach will see it' : '';
+  // the change lands, the sheet stays open on a follow-up rather than dumping out
+  const applied = (msg, next) => {
+    if (prof.isCoach) coachMaybeDirty(prof);
+    else if (prof.coachSync) { prof.coachSync.pendingProgress = true; setTimeout(() => syncTick(true), 600); }
+    App.dmNote = '';
+    saveApp(); render();
+    toast(msg);
+    if (next) next(); else closeSheet();
+  };
   if (a === 'dm-cant-open') {
     const t = todayWeekday();
     const src = moveTargetsThisWeek(prof)[t];
-    showMoveDaySheet(prof, src != null ? src : t);
+    App.dmNote = '';
+    sheetRoot('Move a day', showMoveDaySheet, prof, src != null ? src : t, weekKeyThis());
     return;
   }
-  if (a === 'dm-adjust-open') { showWeekAdjustSheet(prof); return; }
-  if (a === 'dm-day-open') { showMoveDaySheet(prof, +el.dataset.from); return; }
+  if (a === 'dm-adjust-open') { App.dmNote = ''; sheetRoot('Move a day', showWeekAdjustSheet, prof, el.dataset.wk || weekKeyThis()); return; }
+  if (a === 'dm-day-open') { App.dmNote = ''; sheetGo('Move ' + WEEKDAYS[+el.dataset.from], showMoveDaySheet, prof, +el.dataset.from, wkOf()); return; }
+  if (a === 'dm-cancel') { App.dmNote = ''; if (sheetHasBack()) sheetBack(); else closeSheet(); return; }
+
   const noteEl = document.getElementById('dm-note');
-  const note = noteEl ? noteEl.value.trim() : '';
-  if (a === 'dm-move') {
-    setDayMove(prof, +el.dataset.from, +el.dataset.to, note, by);
-    after(`Moved to ${WEEKDAYS_FULL[+el.dataset.to]} ↷ — this week only${prof.isCoach ? ' · syncing to their phone' : prof.coachSync ? ' · your coach will see it' : ''}`);
+  const note = noteEl ? noteEl.value.trim() : (App.dmNote || '').trim();
+  App.dmNote = note;
+
+  // tapped a target day: free days move straight there, busy days ask first
+  if (a === 'dm-pick') {
+    const from = +el.dataset.from, to = +el.dataset.to, wk = wkOf();
+    if ((daySlotLabel(prof, to, wk).act || 'rest') === 'rest') {
+      setDayMove(prof, from, to, note, by, wk);
+      applied(`Moved to ${WEEKDAYS_FULL[to]} ↷${synced()}`, () => sheetRoot('Done', showMoveDoneSheet, prof, from, to, wk, 'move'));
+    } else {
+      sheetGo('Swap or replace', showSwapChoiceSheet, prof, from, to, wk);
+    }
+    return;
+  }
+  if (a === 'dm-swap') {
+    const from = +el.dataset.from, to = +el.dataset.to, wk = wkOf();
+    setDaySwap(prof, from, to, note, by, wk);
+    applied(`${WEEKDAYS[from]} ⇄ ${WEEKDAYS[to]} swapped${synced()}`, () => sheetRoot('Done', showMoveDoneSheet, prof, from, to, wk, 'swap'));
+    return;
+  }
+  if (a === 'dm-replace') {
+    const from = +el.dataset.from, to = +el.dataset.to, wk = wkOf();
+    setDayReplace(prof, from, to, note, by, wk);
+    applied(`Moved to ${WEEKDAYS_FULL[to]} — ${WEEKDAYS_FULL[to]}’s own session skipped${synced()}`);
+    return;
+  }
+  if (a === 'dm-perm') {
+    const from = +el.dataset.from, to = +el.dataset.to, wk = wkOf();
+    makeSwapPermanent(prof, from, to, wk, by);
+    applied(`${WEEKDAYS_FULL[from]} and ${WEEKDAYS_FULL[to]} swapped from now on${synced()}`);
+    return;
+  }
+  if (a === 'dm-move') {   // kept: older entry points that move straight to a free day
+    setDayMove(prof, +el.dataset.from, +el.dataset.to, note, by, wkOf());
+    applied(`Moved to ${WEEKDAYS_FULL[+el.dataset.to]} ↷${synced()}`);
     return;
   }
   if (a === 'dm-skip') {
-    setDayMove(prof, +el.dataset.from, null, note, by);
-    after(`Skipped this week — next week runs as normal${prof.isCoach ? ' · syncing to their phone' : prof.coachSync ? ' · your coach will see it' : ''}`);
+    setDayMove(prof, +el.dataset.from, null, note, by, wkOf());
+    applied(`Skipped — the plan itself is untouched${synced()}`);
     return;
   }
   if (a === 'dm-undo') {
-    clearDayMove(prof, +el.dataset.from, by);
-    after('Change undone ↩ — back to the usual plan');
+    clearDayMove(prof, +el.dataset.from, by, wkOf());
+    applied('Change undone ↩ — back to the usual plan');
     return;
   }
 }

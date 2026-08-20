@@ -4788,6 +4788,43 @@ const LOAuth = {
     return true;
   },
 
+  /* v3.27.1 — the SAME email carries a six-digit code as well as a link, and
+     typing it here finishes the sign-in WITHOUT leaving the app.
+     That matters more than it sounds: on iOS an installed PWA and Safari keep
+     separate storage, so a link tapped in Mail opens Safari and signs you into
+     a different, empty copy of LiftOff. The code keeps you where your data is. */
+  async verifyCode(email, code) {
+    const token = String(code || '').replace(/\D/g, '');
+    const addr = String(email || '').trim();
+    // the right `type` depends on whether the account already existed when the
+    // code was issued, and we can't know that from here — try each in turn
+    let j = null, lastMsg = '';
+    for (const type of ['email', 'magiclink', 'signup']) {
+      const r = await fetch(SYNC_CFG.base + '/auth/v1/verify', {
+        method: 'POST',
+        headers: { apikey: SYNC_CFG.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: addr, token, type }),
+      });
+      let body = null;
+      try { body = await r.json(); } catch (e) {}
+      if (r.ok && body && body.access_token) { j = body; break; }
+      lastMsg = (body && (body.msg || body.error_description || body.message)) || lastMsg;
+      if (r.status === 429) break;                       // rate limited — stop hammering it
+    }
+    if (!j) {
+      const msg = lastMsg || 'That code didn’t work';
+      throw new Error(/expired|invalid|not found/i.test(msg)
+        ? 'That code has expired or doesn’t match — send another' : msg);
+    }
+    const claims = _jwtClaims(j.access_token);
+    this.save({
+      access_token: j.access_token, refresh_token: j.refresh_token,
+      expires_at: Date.now() + (+j.expires_in || 3600) * 1000,
+      user_id: claims.sub || '', email: claims.email || String(email || '').trim(),
+    });
+    return { ok: true, email: this.email() };
+  },
+
   /* Supabase returns the session in the URL fragment. Take it, store it, and
      scrub the address bar so the tokens don't sit in history or get shared. */
   captureFromUrl() {
@@ -4928,16 +4965,20 @@ function localPairs() {
    pull the roster back down. Silent on failure — the app works signed out. */
 async function afterSignIn() {
   const pairs = localPairs();
-  let claimed = 0, failed = 0;
+  let claimed = 0; const why = [];
   for (const p of pairs) {
-    try { const r = await claimPair(p.key, p.as, p.name); r && r.ok ? claimed++ : failed++; }
-    catch (e) { failed++; }
+    try {
+      const r = await claimPair(p.key, p.as, p.name);
+      if (r && r.ok) claimed++; else why.push(CLAIM_MSG[(r || {}).error] || 'that link couldn’t be claimed');
+    } catch (e) { why.push('couldn’t reach the server'); }
   }
   try { App.roster = await fetchRoster(); } catch (e) { App.roster = null; }
   App.rosterAt = Date.now();
   saveApp(); render();
   if (claimed) toast(`Linked ${claimed} ${U.plural(claimed, 'connection')} to your account`);
-  else if (failed && pairs.length) toast('Signed in — couldn’t link this phone’s codes yet');
+  else if (why.length) toast(why[0], 5000);
+  else if (!pairs.length) toast('Signed in — no coaching codes on this phone to link', 5000);
+  return { claimed, why };
 }
 
 async function refreshRoster(force) {
@@ -4951,13 +4992,20 @@ async function refreshRoster(force) {
 function accountCardHtml(prof) {
   const inn = LOAuth.signedIn();
   if (!inn) {
+    const sent = App.authSentTo;
     return `<div class="card">
       <h3>Account</h3>
       <p class="muted mt8">Sign in and your coaching links live on the server instead of only on this phone — so a new phone, or a lost one, doesn’t take your roster with it.</p>
-      <p class="muted mt8" style="font-size:12px;line-height:1.5">No password. We email you a link, you tap it, you’re in. Everything keeps working exactly as it does now while you’re signed out.</p>
+      <p class="muted mt8" style="font-size:12px;line-height:1.5">No password. We email you a six-digit code, you type it in here. Everything keeps working exactly as it does now while you’re signed out.</p>
       <input class="ob-input" id="auth-email" type="email" inputmode="email" autocomplete="email"
-        placeholder="you@example.com" style="margin-top:10px;font-size:15px;font-weight:600;padding:12px">
-      <button class="btn primary block mt8" data-a="auth-link">Email me a sign-in link</button>
+        placeholder="you@example.com" value="${U.esc(sent || '')}" style="margin-top:10px;font-size:15px;font-weight:600;padding:12px">
+      ${sent ? `<div class="cq-target" style="margin-top:10px">Code sent to ${U.esc(sent)} — it lasts an hour</div>
+        <input class="ob-input" id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+          placeholder="6-digit code" style="margin-top:8px;font-size:22px;font-weight:800;letter-spacing:5px;text-align:center;padding:12px">
+        <button class="btn primary block mt8" data-a="auth-verify">Finish signing in</button>
+        <button class="btn ghost block mt8" data-a="auth-link">Send another code</button>
+        <p class="muted mt8" style="font-size:11.5px;line-height:1.45">There's a link in that email too — but <b>type the code instead</b>. Tapping the link opens your browser, which on iPhone is a separate copy of LiftOff without your training in it.</p>`
+        : `<button class="btn primary block mt8" data-a="auth-link">Email me a code</button>`}
     </div>`;
   }
   const r = App.roster;
@@ -4970,6 +5018,7 @@ function accountCardHtml(prof) {
         ${asAth.length ? `<br>Coached by <b>${U.esc((asAth[0] || {}).coach_name || 'someone')}</b>` : ''}
       </div>`
       : `<div class="muted mt8" style="font-size:12.5px">Roster not loaded — tap refresh, or check your connection.</div>`}
+    ${localPairs().length ? `<button class="btn ghost block mt8" data-a="auth-relink">Link this phone’s ${localPairs().length} ${U.plural(localPairs().length, 'coaching code')} to my account</button>` : ''}
     <div class="row mt8" style="gap:7px">
       <button class="btn sm ghost" data-a="auth-roster">Refresh roster</button>
       <button class="btn sm ghost" data-a="auth-signout">Sign out</button>
@@ -5586,7 +5635,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.27.0';
+const APP_VERSION = '3.27.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -8416,9 +8465,26 @@ function dispatch(e) {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('That doesn’t look like an email address'); return; }
     el.disabled = true; el.textContent = 'Sending…';
     LOAuth.requestLink(email)
-      .then(() => toast('Check ' + email + ' — tap the link on this phone', 6000))
-      .catch(e => toast(/rate|429/i.test(e.message) ? 'Too many attempts — wait a minute' : 'Couldn’t send that: ' + e.message, 5000))
-      .finally(() => { el.disabled = false; el.textContent = 'Email me a sign-in link'; });
+      .then(() => { App.authSentTo = email; render(); toast('Check ' + email + ' for a six-digit code', 6000); })
+      .catch(e => { toast(/rate|429/i.test(e.message) ? 'Too many attempts — wait a minute' : 'Couldn’t send that: ' + e.message, 5000);
+        el.disabled = false; el.textContent = 'Email me a code'; });
+    return;
+  }
+  if (a === 'auth-verify') {
+    const codeEl = document.getElementById('auth-code');
+    const emEl = document.getElementById('auth-email');
+    const code = (codeEl ? codeEl.value : '').replace(/\D/g, '');
+    const email = (emEl ? emEl.value : App.authSentTo || '').trim();
+    if (code.length !== 6) { toast('That should be six digits'); return; }
+    el.disabled = true; el.textContent = 'Checking…';
+    LOAuth.verifyCode(email, code)
+      .then(res => { App.authSentTo = null; render(); toast('Signed in as ' + res.email); return afterSignIn(); })
+      .catch(e => { toast(e.message, 5000); el.disabled = false; el.textContent = 'Finish signing in'; });
+    return;
+  }
+  if (a === 'auth-relink') {
+    el.disabled = true; el.textContent = 'Linking…';
+    afterSignIn().finally(() => { el.disabled = false; render(); });
     return;
   }
   if (a === 'auth-roster') {

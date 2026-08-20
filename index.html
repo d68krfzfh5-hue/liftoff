@@ -315,6 +315,36 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .sig-act { display: inline-flex; align-items: center; min-height: 34px; font-size: 12px; font-weight: 800; color: var(--violet); margin-top: 2px; margin-left: -3px; padding: 0 3px; }
 .sig-act:active { opacity: .55; }
 .sig-good-head { font-size: 10px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 2px; padding-top: 12px; border-top: 1px dashed var(--line); }
+/* v3.24 — sheet back trail, inline day editing, roster week grid */
+.sheet-back { display: inline-flex; align-items: center; min-height: 34px; font-size: 12.5px; font-weight: 800; color: var(--violet); background: none; padding: 0 4px 0 0; margin: -2px 0 8px -4px; }
+.sheet-back:active { opacity: .55; }
+.wk-day.wk-edit { display: flex; align-items: center; gap: 6px; padding: 0; }
+.wk-day-main { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; text-align: left; background: none; padding: 10px 0; }
+.wk-day-main:active { opacity: .6; }
+.wk-day-acts { display: flex; gap: 4px; flex: none; }
+.wk-act { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--fill); color: var(--ink2); font-weight: 800; font-size: 15px; }
+.wk-act:active { opacity: .55; }
+.wk-act svg { width: 15px; height: 15px; }
+.wk-day.d-rest .wk-day-main .nm { color: var(--ink3); }
+.rw { padding-bottom: 12px; }
+.rw-head { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; background: none; padding: 0 0 4px; }
+.rw-head:active { opacity: .6; }
+.rw-tx { flex: 1; min-width: 0; }
+.rw-name { display: block; font-weight: 800; font-size: 14.5px; }
+.rw-sub { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 1px; }
+.rw-go { flex: none; font-size: 12px; font-weight: 800; color: var(--violet); }
+.rw-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 10px; }
+.rw-day { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 2px; border-radius: 9px; background: var(--fill); min-height: 44px; }
+.rw-day:active { opacity: .55; }
+.rw-day .rw-wd { font-size: 9px; font-weight: 800; color: var(--ink3); text-transform: uppercase; }
+.rw-day .rw-n { font-size: 10px; font-weight: 800; color: var(--ink2); }
+.rw-day.lift { background: rgba(20,22,34,0.10); }
+.rw-day.lift .rw-n { color: var(--ink); }
+.rw-day.cardio { background: var(--coach-bg); }
+.rw-day.cardio .rw-n { color: var(--violet); }
+.rw-day.d-rest { background: transparent; border: 1px dashed var(--line); }
+.rw-day.d-rest .rw-wd { color: var(--ink3); opacity: .8; }
+[data-theme="dark"] .rw-day.lift { background: rgba(255,255,255,0.10); }
 /* v3.23 — cardio KPIs */
 .ck-row { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
 .ck-row:first-child { border-top: 0; }
@@ -5144,7 +5174,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.23.0';
+const APP_VERSION = '3.24.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6733,15 +6763,48 @@ function workoutAction(a, el, prof) {
 'use strict';
 
 let _sheetPlayers = [];
-function closeSheet() {
+/* ---------- sheets ----------
+   v3.24: sheets remember where they came from. Drilling in pushes onto a
+   stack, so "‹ Back" steps up one level instead of dumping you out to the
+   start and making you navigate all the way in again. */
+let _sheetStack = [];
+function _teardownSheet() {                 // DOM only — keeps the stack intact
   _sheetPlayers.forEach(p => p.stop()); _sheetPlayers = [];
   document.querySelectorAll('.sheet-veil, .sheet').forEach(e => e.remove());
 }
-function showSheet(html) {
-  closeSheet();
-  document.body.insertAdjacentHTML('beforeend',
-    `<div class="sheet-veil" data-a="sheet-close"></div><div class="sheet"><div class="grab"></div>${html}</div>`);
+function closeSheet() {                     // a real dismissal — drop the trail too
+  _teardownSheet();
+  _sheetStack = []; App._curSheet = null;
 }
+function showSheet(html) {
+  _teardownSheet();
+  const back = _sheetStack.length ? _sheetStack[_sheetStack.length - 1] : null;
+  const bar = back
+    ? `<button class="sheet-back" data-a="sheet-back">‹ ${U.esc(back.label || 'Back')}</button>`
+    : '';
+  document.body.insertAdjacentHTML('beforeend',
+    `<div class="sheet-veil" data-a="sheet-close"></div><div class="sheet"><div class="grab"></div>${bar}${html}</div>`);
+}
+/* open a sheet as a fresh trail (nothing to go back to) */
+function sheetRoot(label, fn, ...args) {
+  _sheetStack = [];
+  App._curSheet = { fn, args, label };
+  fn(...args);
+}
+/* drill one level deeper, remembering how to come back */
+function sheetGo(label, fn, ...args) {
+  if (App._curSheet) _sheetStack.push(App._curSheet);
+  App._curSheet = { fn, args, label };
+  fn(...args);
+}
+/* step back up one level, or dismiss if we're at the top */
+function sheetBack() {
+  const prev = _sheetStack.pop();
+  if (!prev) { closeSheet(); return; }
+  App._curSheet = prev;
+  prev.fn(...prev.args);
+}
+const sheetHasBack = () => _sheetStack.length > 0;
 function showConfirm(title, text, keepLabel, actLabel, cb) {
   document.querySelectorAll('.modal-veil').forEach(e => e.remove());
   const id = 'cf' + Date.now();
@@ -7483,7 +7546,7 @@ function dispatch(e) {
   if (prof && v2Action(a, el, prof)) return;
   // v2.1: coach mode
   // v3.23 — cardio prescription editor
-  if (a === 'cd-open') { App.cardioDraft = null; showCardioEditSheet(prof, +el.dataset.d); return; }
+  if (a === 'cd-open') { App.cardioDraft = null; sheetGo('Session', showCardioEditSheet, prof, +el.dataset.d); return; }
   if (a === 'cd-act') {
     const s = App.cardioDraft; s.act = el.dataset.v;
     const m = ACT_META[s.act] || ACT_META.other;
@@ -7511,12 +7574,13 @@ function dispatch(e) {
     prof.quiz.weekSchedule = prof.quiz.weekSchedule || {};
     prof.quiz.weekSchedule[d] = s.act === 'other' ? 'other' : s.act;
     if (prof.isCoach) coachMaybeDirty(prof);
-    saveApp(); closeSheet(); render();
+    saveApp(); render();
+    if (sheetHasBack()) sheetBack(); else closeSheet();
     toast(`${WEEKDAYS[d]} set — ${cardioTargetLine(prof, s) || cardioLabel(prof, s)}`);
     return;
   }
   // v3.23 — logging a cardio session
-  if (a === 'cl-open') { startCardioLog(prof, +el.dataset.d, el.dataset.iso || U.todayISO()); return; }
+  if (a === 'cl-open') { sheetGo('Session', startCardioLog, prof, +el.dataset.d, el.dataset.iso || U.todayISO()); return; }
   if (a === 'cl-step') { cardioLogStep(prof, el.dataset.f, +el.dataset.d); showCardioLogSheet(prof); return; }
   if (a === 'cl-typein') { cardioTypeIn(prof, el, 'log'); return; }
   if (a === 'cl-feel') { App.cardioLog.feel = el.dataset.v; showCardioLogSheet(prof); return; }
@@ -7537,7 +7601,8 @@ function dispatch(e) {
     if (i >= 0) prof.sportLogs[i] = L; else prof.sportLogs.push(L);
     if (prof.coachSync) { prof.coachSync.pendingProgress = true; if (typeof syncTick === 'function') setTimeout(() => syncTick(true), 800); }
     App.cardioLog = null;
-    saveApp(); closeSheet(); render();
+    saveApp(); render();
+    if (sheetHasBack()) sheetBack(); else closeSheet();
     toast('Session logged — nice work.');
     return;
   }
@@ -7547,9 +7612,58 @@ function dispatch(e) {
     try { localStorage.setItem('liftoff.plantab', App.planTab); } catch (e) {}   // stick to whichever half you live in
     App._scrollTop = true; render(); return;
   }
-  if (a === 'wk-open') { showWeekSheet(prof, el.dataset.wk); return; }
-  if (a === 'wk-session') { showSessionSheet(prof, el.dataset.date, el.dataset.id); return; }
-  if (a === 'wk-cardio') { showCardioSessionSheet(prof, el.dataset.iso, el.dataset.act); return; }
+  if (a === 'sheet-back') { sheetBack(); return; }
+  if (a === 'roster-tab') { App.rosterTab = el.dataset.v === 'weeks' ? 'weeks' : 'triage'; App._scrollTop = true; render(); return; }
+  if (a === 'rw-week') { App.rosterWeek = el.dataset.v === 'this' ? 'this' : 'next'; render(); return; }
+  if (a === 'rw-open') {   // open that client's week sheet without leaving the roster
+    const c = App.data.profiles[el.dataset.id]; if (!c) return;
+    App.data.activeProfileId = c.id; App.view = 'plan'; App.planTab = 'weeks'; saveApp(); render();
+    sheetRoot(weekBackLabel(c, el.dataset.wk), showWeekSheet, c, el.dataset.wk);
+    return;
+  }
+  if (a === 'rw-day') {    // one tap from the overview to that exact day
+    const c = App.data.profiles[el.dataset.id]; if (!c) return;
+    const d = +el.dataset.d, wk = el.dataset.wk;
+    App.data.activeProfileId = c.id; App.view = 'plan'; App.planTab = 'weeks'; saveApp(); render();
+    sheetRoot(weekBackLabel(c, wk), showWeekSheet, c, wk);
+    sheetGo('Week', showDaySwapSheet, c, d, wk);
+    return;
+  }
+  if (a === 'wk-open') { sheetRoot(weekBackLabel(prof, el.dataset.wk), showWeekSheet, prof, el.dataset.wk); return; }
+  if (a === 'wk-session') { sheetGo('Session', showSessionSheet, prof, el.dataset.date, el.dataset.id); return; }
+  if (a === 'wk-cardio') { sheetGo('Session', showCardioSessionSheet, prof, el.dataset.iso, el.dataset.act); return; }
+  if (a === 'wk-editday') {   // straight into the builder for that day, right scope
+    const d = +el.dataset.d, scope = el.dataset.scope;
+    const idx = (prof.plan.dayMap || {})[d];
+    if (idx == null || !prof.plan.days[idx]) { toast('That day isn’t a plan workout'); return; }
+    const e2 = document.createElement('button');
+    e2.dataset.idx = String(idx); e2.dataset.scope = scope === 'nextweek' ? 'nextweek' : '';
+    sheetGo(weekBackLabel(prof, scope === 'nextweek' ? weekKeyNext() : weekKeyThis()), () => customAction('plan-edit-day', e2, prof));
+    return;
+  }
+  if (a === 'wk-swapday') { sheetGo('Week', showDaySwapSheet, prof, +el.dataset.d, el.dataset.wk); return; }
+  if (a === 'ds-act') {      // change what kind of day this is
+    const d = +el.dataset.d, v = el.dataset.v;
+    prof.quiz.weekSchedule = prof.quiz.weekSchedule || {};
+    prof.quiz.weekSchedule[d] = v;
+    if (v === 'rest' || v === 'lift') { const c = (prof.plan || {}).cardio; if (c) delete c[d]; }
+    if (prof.plan) prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+    if (prof.isCoach) coachMaybeDirty(prof);
+    saveApp(); render();
+    showDaySwapSheet(prof, d, el.dataset.wk);
+    return;
+  }
+  if (a === 'ds-workout') {  // put a different plan day on this weekday
+    const d = +el.dataset.d, idx = +el.dataset.idx;
+    prof.plan.dayMap = prof.plan.dayMap || {};
+    for (const [wd, i] of Object.entries(prof.plan.dayMap)) if (+i === idx && +wd !== d) delete prof.plan.dayMap[wd];
+    prof.plan.dayMap[d] = idx;
+    if (prof.customMap) delete prof.customMap[d];
+    if (prof.isCoach) coachMaybeDirty(prof);
+    saveApp(); render();
+    showDaySwapSheet(prof, d, el.dataset.wk);
+    return;
+  }
   if (a === 'wk-editnext') {
     const wd = [0, 1, 2, 3, 4, 5, 6].find(d => ((prof.quiz.weekSchedule || {})[d] === 'lift') && workoutForWeekdayInWeek(prof, d, weekKeyNext()));
     if (wd == null) { toast('No lifting days scheduled next week'); return; }
@@ -8157,7 +8271,8 @@ function customAction(a, el, prof) {
         ensureWeekPlan(prof); pruneWeekPlan(prof);
         const wk = weekKeyNext();
         (prof.plan.weekPlan[wk] = prof.plan.weekPlan[wk] || {})[d.planIdx] = { name, note: (d.note || '').trim(), exercises: d.exercises, by: prof.isCoach ? 'coach' : 'athlete', at: U.todayISO() };
-        saveApp(); closeSheet(); render();
+        saveApp(); render();
+        if (sheetHasBack()) sheetBack(); else closeSheet();
         toast(`Next week’s “${name}” set — your standard plan is unchanged`);
         return;
       }
@@ -8166,7 +8281,8 @@ function customAction(a, el, prof) {
       day.exercises = d.exercises;
       day.note = (d.note || '').trim();
       day.edited = true;
-      saveApp(); closeSheet(); render();
+      saveApp(); render();
+      if (sheetHasBack()) sheetBack(); else closeSheet();
       toast(`“${name}” updated — it’s your day now`);
       return;
     }
@@ -9299,12 +9415,26 @@ function showWeekSheet(prof, wk) {
       rows.push(`<div class="wk-day miss"><span class="wk-day-d">${WEEKDAYS[d]}</span>
         <span class="wk-day-tx"><span class="nm">${act === 'lift' ? 'Not logged' : act === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, act))}</span></span></div>`);
     } else {
+      // v3.24 — every upcoming day is editable straight from the overview: no
+      // more "open the session, close everything, come back in" to change a day.
       const w4 = act === 'lift' ? workoutForWeekdayInWeek(prof, d, wk) : null;
-      rows.push(`<button class="wk-day" data-a="${when === 'next' ? 'nextweek-peek' : 'day-peek'}" data-d="${d}">
-        <span class="wk-day-d">${WEEKDAYS[d]}</span>
-        <span class="wk-day-tx"><span class="nm">${w4 ? U.esc(w4.name) : act === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, act))}</span>
-          ${w4 ? `<span class="mt">${w4.exercises.length} exercises · ~${estMinutes({ exercises: w4.exercises })} min</span>` : ''}</span>
-        <span class="wk-day-go">›</span></button>`);
+      const spec = act !== 'lift' && act !== 'rest' ? cardioSpecFor(prof, d) : null;
+      const scope = when === 'next' ? 'nextweek' : 'plan';
+      const sub = w4 ? `${w4.exercises.length} exercises · ~${estMinutes({ exercises: w4.exercises })} min`
+        : spec ? (cardioTargetLine(prof, spec) || cardioLabel(prof, spec))
+        : act === 'rest' ? 'Nothing scheduled' : '';
+      rows.push(`<div class="wk-day wk-edit${act === 'rest' ? ' d-rest' : ''}">
+        <button class="wk-day-main" data-a="${when === 'next' ? 'nextweek-peek' : 'day-peek'}" data-d="${d}">
+          <span class="wk-day-d">${WEEKDAYS[d]}</span>
+          <span class="wk-day-tx"><span class="nm">${w4 ? U.esc(w4.name) : spec ? U.esc(cardioLabel(prof, spec)) : act === 'rest' ? 'Rest' : U.esc(sportLabelFor(prof, act))}</span>
+            ${sub ? `<span class="mt${spec ? ' wk-cd' : ''}">${sub}</span>` : ''}</span>
+        </button>
+        <span class="wk-day-acts">
+          ${w4 ? `<button class="wk-act" data-a="wk-editday" data-d="${d}" data-scope="${scope}" title="Edit this workout">${IC('edit')}</button>
+                  <button class="wk-act" data-a="wk-swapday" data-d="${d}" data-wk="${wk}" title="Swap or change this day">${IC('swap')}</button>`
+            : `<button class="wk-act" data-a="wk-swapday" data-d="${d}" data-wk="${wk}" title="Change this day">${act === 'rest' ? '+' : IC('edit')}</button>`}
+        </span>
+      </div>`);
     }
   }
   const prov = when === 'next' ? nextWeekProvenance(prof) : null;
@@ -9313,8 +9443,47 @@ function showWeekSheet(prof, wk) {
     ${prov ? `<div class="wk-prov t-${prov.tone}" style="margin-top:8px">${prov.label}</div>` : ''}
     ${when === 'past' && sum.vol ? `<div class="muted mt8" style="font-size:12.5px">${Math.round(sum.vol).toLocaleString()} ${U.unitLabel(src.units)} total volume · ${sum.mins} min${sum.prs ? ` · ${sum.prs} new best${sum.prs > 1 ? 's' : ''}` : ''}</div>` : ''}
     <div class="mt12">${rows.join('')}</div>
-    ${when === 'next' ? `<button class="btn ghost block mt12" data-a="wk-editnext">Edit next week ›</button>` : ''}
-    <button class="btn ghost block mt8" data-a="sheet-close">Close</button>`);
+    ${when !== 'past' ? `<div class="muted mt8" style="font-size:11.5px;line-height:1.45">Tap a day to preview it, ${IC('edit')} to edit the session, or ${IC('swap')} to change what that day is.</div>` : ''}
+    <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
+}
+
+/* label for going "back" to a week, so the trail reads sensibly */
+function weekBackLabel(prof, wk) {
+  return wk === weekKeyThis() ? 'This week' : wk === weekKeyNext() ? 'Next week' : weekRangeLabel(wk);
+}
+
+/* v3.24 — one place to change what a day IS: rest, lift (and which workout),
+   or a cardio / other session. Reachable inline from the week overview. */
+function showDaySwapSheet(prof, d, wk) {
+  const sched = prof.quiz.weekSchedule || {};
+  const act = sched[d] || 'rest';
+  const plan = prof.plan || { days: [] };
+  const curIdx = (plan.dayMap || {})[d];
+  const spec = cardioSpecFor(prof, d);
+  const who = prof.isCoach && prof.coachOf ? `${U.esc(prof.coachOf.athleteName)}’s` : 'your';
+  const kinds = [['lift', 'Lift'], ['run', 'Run'], ['ride', 'Ride'], ['swim', 'Swim'], ['sport', 'Sport'], ['other', 'Other'], ['rest', 'Rest']];
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${WEEKDAYS_FULL[d]}
+      <span class="muted" style="font-size:13px;font-weight:600">· ${weekBackLabel(prof, wk)}</span></h3>
+    <p class="muted mt8" style="margin-bottom:10px">Change what this day is on ${who} week — then drill in as far as you like without starting over.</p>
+
+    <div class="cq-lb">This day is</div>
+    <div class="cq-acts">${kinds.map(([v, l]) =>
+      `<button class="cq-act ${act === v ? 'on' : ''}" data-a="ds-act" data-d="${d}" data-v="${v}" data-wk="${U.esc(wk)}">${l}</button>`).join('')}</div>
+
+    ${act === 'lift' && plan.days.length ? `<div class="cq-lb" style="margin-top:16px">Which workout</div>
+      <div class="mt8">${plan.days.map((day, i) => `<button class="ex-row" style="width:100%;text-align:left" data-a="ds-workout" data-d="${d}" data-idx="${i}" data-wk="${U.esc(wk)}">
+        <span style="flex:1;min-width:0"><div class="nm">${U.esc(day.name)}</div>
+          <div class="muted" style="font-size:11.5px">${day.exercises.length} exercises · ~${estMinutes(day)} min</div></span>
+        ${curIdx === i ? '<span style="font-weight:900;color:var(--violet)">●</span>' : '<span class="go">›</span>'}
+      </button>`).join('')}</div>
+      ${curIdx != null ? `<button class="btn ghost block mt8" data-a="wk-editday" data-d="${d}" data-scope="${wk === weekKeyNext() ? 'nextweek' : 'plan'}">Edit this workout ›</button>` : ''}`
+      : ''}
+
+    ${act !== 'lift' && act !== 'rest' ? `<div class="cq-lb" style="margin-top:16px">The session</div>
+      <div class="cq-target">${spec ? (cardioTargetLine(prof, spec) || cardioLabel(prof, spec)) : 'Nothing prescribed yet'}</div>
+      <button class="btn ${spec ? 'ghost' : 'primary'} block mt8" data-a="cd-open" data-d="${d}">${spec ? 'Edit the session ›' : 'Prescribe a session ›'}</button>` : ''}
+
+    <button class="btn ghost block mt16" data-a="sheet-back">Done</button>`);
 }
 
 /* a completed cardio / other session, read-only, either role, any date */
@@ -9381,6 +9550,58 @@ function rosterSignals() {
     return { prof: p, sigs, worst: sigs.reduce((m, s) => Math.max(m, s.sev), 0) };
   });
 }
+/* v3.24 — everyone's upcoming week on one screen. Tap any day to drop straight
+   into that client's week, at whatever depth you need, without unwinding. */
+function renderRosterWeeks(prof, rows) {
+  const nextWk = weekKeyNext(), thisWk = weekKeyThis();
+  const wk = App.rosterWeek === 'this' ? thisWk : nextWk;
+  const card = r => {
+    const c = r.prof, sched = (c.quiz && c.quiz.weekSchedule) || {};
+    const prov = nextWeekProvenance(c);
+    const days = [];
+    for (let d = 0; d < 7; d++) {
+      const act = sched[d] || 'rest';
+      const w4 = act === 'lift' ? workoutForWeekdayInWeek(c, d, wk) : null;
+      const spec = (act !== 'lift' && act !== 'rest') ? cardioSpecFor(c, d) : null;
+      const cls = act === 'rest' ? 'd-rest' : act === 'lift' ? 'lift' : 'cardio';   // NB: bare `rest` collides with the rest-timer overlay class
+      const short = w4 ? w4.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3)
+        : spec ? (cardioLabel(c, spec) || act).slice(0, 3)
+        : act === 'rest' ? '' : act.slice(0, 3);
+      days.push(`<button class="rw-day ${cls}" data-a="rw-day" data-id="${c.id}" data-d="${d}" data-wk="${wk}"
+        title="${U.esc(w4 ? w4.name : spec ? cardioLabel(c, spec) : act)}">
+        <span class="rw-wd">${WEEKDAYS[d][0]}</span><span class="rw-n">${U.esc(short)}</span></button>`);
+    }
+    const nLift = Object.values(sched).filter(v => v === 'lift').length;
+    const nCardio = Object.values(sched).filter(v => v !== 'lift' && v !== 'rest').length;
+    return `<div class="card rw">
+      <button class="rw-head" data-a="rw-open" data-id="${c.id}" data-wk="${wk}">
+        <span class="rost-av a1">${U.esc(initials(c.coachOf.athleteName))}</span>
+        <span class="rw-tx"><span class="rw-name">${U.esc(c.coachOf.athleteName)}${c.demo ? ' <span class="tag">demo</span>' : ''}</span>
+          <span class="rw-sub">${nLift} ${U.plural(nLift, 'lift')}${nCardio ? ` · <span class="wk-cd">${nCardio} cardio</span>` : ''}${7 - nLift - nCardio ? ` · ${7 - nLift - nCardio} rest` : ''}</span></span>
+        <span class="rw-go">Open ›</span>
+      </button>
+      ${wk === nextWk ? `<div class="wk-prov t-${prov.tone}" style="margin-top:2px">${prov.label}</div>` : ''}
+      <div class="rw-grid">${days.join('')}</div>
+    </div>`;
+  };
+  return `<div class="screen">
+    <div class="hdr"><div><div class="hi">Everyone’s weeks</div>
+      <div class="sub">${rows.length} ${U.plural(rows.length, 'client')} · tap any day to edit it</div></div>
+      <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
+    <div class="seg plan-seg">
+      <button data-a="roster-tab" data-v="triage">Needs you</button>
+      <button class="on" data-a="roster-tab" data-v="weeks">Everyone’s weeks</button>
+    </div>
+    <div class="seg" style="margin-bottom:14px">
+      <button class="${App.rosterWeek === 'this' ? 'on' : ''}" data-a="rw-week" data-v="this">This week</button>
+      <button class="${App.rosterWeek !== 'this' ? 'on' : ''}" data-a="rw-week" data-v="next">Next week</button>
+    </div>
+    ${rows.length ? rows.map(card).join('') : `<div class="card"><h3>No athletes yet</h3>
+      <p class="muted mt8">Pair someone, or load the demo squad from your profile.</p></div>`}
+    <div style="height:70px"></div>
+  </div>`;
+}
+
 function renderCoachRoster(prof) {
   const rows = rosterSignals();
   const needing = rows.filter(r => r.worst >= 2);
@@ -9404,11 +9625,16 @@ function renderCoachRoster(prof) {
     </button>`;
 
   const myProf = Object.values(App.data.profiles).find(p => !p.isCoach);
+  if (App.rosterTab === 'weeks') return renderRosterWeeks(prof, rows);
   return `<div class="screen">
     <div class="hdr"><div><div class="hi">Your athletes</div>
       <div class="sub">${rows.length} ${U.plural(rows.length, 'client')} · ${needing.length ? `${needing.length} need${needing.length === 1 ? 's' : ''} you` : 'all on track'}${rows.length && rows.every(r => r.prof.demo) ? ' · demo data' : ''}</div></div>
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
 
+    <div class="seg plan-seg">
+      <button class="on" data-a="roster-tab" data-v="triage">Needs you</button>
+      <button data-a="roster-tab" data-v="weeks">Everyone’s weeks</button>
+    </div>
     <div class="card triage">
       <div class="row"><h3>Needs you</h3><span class="spacer"></span>
         <span class="tag ${needing.length ? 'hot' : 'ok'}">${needing.length ? `${needing.length} of ${rows.length}` : 'all clear'}</span></div>

@@ -263,6 +263,7 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
   border-radius: var(--rs); background: var(--surface); outline: none;
 }
 .ob-input:focus { border-color: var(--brand); }
+textarea.ob-input { font-family: inherit; }   /* textareas default to monospace otherwise */
 .emoji-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .emoji-pick { font-size: 22px; width: 46px; height: 46px; border-radius: 14px; background: var(--surface); border: 2px solid var(--line); }
 .emoji-pick.on { border-color: var(--brand); background: var(--warn-bg); }
@@ -315,6 +316,40 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .sig-act { display: inline-flex; align-items: center; min-height: 34px; font-size: 12px; font-weight: 800; color: var(--violet); margin-top: 2px; margin-left: -3px; padding: 0 3px; }
 .sig-act:active { opacity: .55; }
 .sig-good-head { font-size: 10px; font-weight: 800; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 2px; padding-top: 12px; border-top: 1px dashed var(--line); }
+/* v3.25 — voice notes */
+.vn { border-radius: 12px; background: var(--fill); padding: 9px 11px; margin-bottom: 8px; }
+.vn.mine { background: var(--coach-bg); }
+/* in a full thread, offset the two sides so it reads like a conversation */
+.vn-thread .vn { margin-right: 30px; border-bottom-left-radius: 4px; }
+.vn-thread .vn.mine { margin-right: 0; margin-left: 30px; border-bottom-left-radius: 12px; border-bottom-right-radius: 4px; }
+.vn.unheard { box-shadow: inset 0 0 0 1.5px var(--violet); }
+.vn-top { display: flex; align-items: baseline; gap: 7px; font-size: 11px; color: var(--ink3); }
+.vn-top b { font-size: 11.5px; font-weight: 800; color: var(--ink2); }
+.vn-ref { font-weight: 800; color: var(--violet); }
+.vn-when { font-size: 10.5px; }
+.vn-tx { font-size: 13px; line-height: 1.5; margin-top: 5px; }
+.vn-gone { font-size: 11.5px; font-style: italic; color: var(--ink2); margin-top: 5px; }
+.vn-play { display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 7px; padding: 8px 11px; border-radius: 999px; background: var(--surface); min-height: 40px; }
+.vn-play.big { justify-content: center; }
+.vn-play:active { opacity: .6; }
+.vn-play.playing { background: var(--ink); color: var(--on-ink); }
+.vn-ic { flex: none; font-size: 12px; font-weight: 900; }
+.vn-bars { flex: 1; display: flex; align-items: center; gap: 2.5px; height: 18px; }
+.vn-bars i { flex: 1; background: currentColor; opacity: .35; border-radius: 2px; }
+.vn-play.playing .vn-bars i { opacity: .8; }
+.vn-sec { flex: none; font-size: 11.5px; font-weight: 800; }
+.vn-rec { text-align: center; margin-top: 14px; }
+.vn-btn { display: inline-flex; align-items: center; gap: 9px; padding: 13px 20px; border-radius: 999px; background: var(--ink); color: var(--on-ink); font-weight: 800; font-size: 14px; min-height: 48px; }
+.vn-btn.on { background: #C0302C; }
+.vn-btn:active { opacity: .7; }
+.vn-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; }
+.vn-btn.on .vn-dot { animation: vnpulse 1s ease-in-out infinite; }
+@keyframes vnpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
+.vn-hint { font-size: 11.5px; color: var(--ink2); margin-top: 9px; }
+.vn-card .mt8 .vn:last-child { margin-bottom: 0; }
+.cwx-vn { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 8px; padding: 8px 11px; border-radius: 10px; background: var(--coach-bg); color: var(--violet); font-size: 12px; font-weight: 800; min-height: 36px; }
+.cwx-vn svg { width: 14px; height: 14px; }
+.cwx-vn:active { opacity: .6; }
 /* v3.24 — sheet back trail, inline day editing, roster week grid */
 .sheet-back { display: inline-flex; align-items: center; min-height: 34px; font-size: 12.5px; font-weight: 800; color: var(--violet); background: none; padding: 0 4px 0 0; margin: -2px 0 8px -4px; }
 .sheet-back:active { opacity: .55; }
@@ -4762,8 +4797,56 @@ function buildPlanDoc(prof) { // coach workspace → athlete
     dayMoves: ownDayMoves(prof, 'coach'), // coach's this-week move/skip adjustments
     weekPlan: packWeekPlan(prof),         // coach's per-week (e.g. next-week) plan overrides
     cardio: sanitizeCardio((prof.plan || {}).cardio),   // v3.23 prescribed cardio / other sessions
+    thread: sanitizeThread(pruneThread(prof)),          // v3.25 voice + text notes
     program: prof.program || null,
   };
+}
+
+/* v3.25 — thread notes for the wire. Audio is the heavy part, so only the
+   newest few clips carry it and each one is size-checked before it goes. */
+function sanitizeThread(raw, fromSide) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const n of raw.slice(-VN_KEEP_NOTES)) {
+    if (!n || (n.from !== 'coach' && n.from !== 'athlete')) continue;
+    const ref = n.ref && ['exercise', 'day', 'session', 'general'].includes(n.ref.kind)
+      ? { kind: n.ref.kind,
+          exId: n.ref.exId && EX_BY_ID[n.ref.exId] ? n.ref.exId : undefined,
+          d: (n.ref.d != null && /^[0-6]$/.test(String(n.ref.d))) ? +n.ref.d : undefined,
+          label: n.ref.label ? String(n.ref.label).slice(0, 40) : undefined }
+      : { kind: 'general' };
+    const o = { id: String(n.id || U.uid()).slice(0, 24), from: n.from, at: +n.at || Date.now(),
+      text: n.text ? String(n.text).slice(0, 300) : undefined, ref,
+      sec: (n.sec != null && isFinite(+n.sec)) ? U.clamp(+n.sec, 0, VN_MAX_SEC) : undefined,
+      seen: !!n.seen, expired: n.expired ? true : undefined };
+    if (n.audio && typeof n.audio.data === 'string' && n.audio.data.length <= VN_MAX_BYTES
+        && /^data:audio\//.test(n.audio.data)) {
+      o.audio = { data: n.audio.data, mime: String(n.audio.mime || '').slice(0, 40), sec: o.sec || 0 };
+    } else if (n.audio) { o.expired = true; }
+    out.push(o);
+  }
+  // only the newest clips keep their audio on the wire
+  const withAudio = out.filter(n => n.audio);
+  if (withAudio.length > VN_KEEP_AUDIO) {
+    withAudio.slice(0, withAudio.length - VN_KEEP_AUDIO).forEach(n => { delete n.audio; n.expired = true; });
+  }
+  return out;
+}
+/* merge an incoming thread with what we already hold, newest wins per id */
+function mergeThread(prof, incoming) {
+  const mine = ensureThread(prof);
+  const byId = {};
+  for (const n of mine) byId[n.id] = n;
+  for (const n of sanitizeThread(incoming)) {
+    const cur = byId[n.id];
+    if (!cur) { byId[n.id] = n; continue; }
+    // never let a stripped copy wipe audio we already have locally
+    const audio = cur.audio || n.audio;
+    byId[n.id] = Object.assign({}, cur, n, audio ? { audio, expired: undefined } : {});
+  }
+  prof.coachThread = Object.values(byId).sort((a, b) => (a.at || 0) - (b.at || 0));
+  pruneThread(prof);
+  return prof.coachThread;
 }
 
 /* cardio prescriptions, trimmed and validated for the wire (both directions) */
@@ -4823,6 +4906,7 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
   prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
   prof.plan.weekPlan = unpackWeekPlan(doc.weekPlan); // adopt the coach's per-week overrides
   prof.plan.cardio = sanitizeCardio(doc.cardio);     // v3.23 — and their cardio / other sessions
+  if (doc.thread) mergeThread(prof, doc.thread);     // v3.25 — and any notes they've sent
   pruneWeekPlan(prof);
   // coach-sent custom workouts replace previous coach-sent ones; hers stay
   const hers = (prof.customWorkouts || []).filter(c => !c.fromCoach);
@@ -4896,6 +4980,7 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
       entries: (l.entries || []).map(e => ({ exId: e.exId, feel: e.feel || null, targetW: (e.targetW != null ? e.targetW : null), coachSet: !!e.coachSet, sets: (e.sets || []).map(s => ({ w: s.w || 0, reps: s.reps || 0 })) })),
     })),
     msgReact: prof.coachMsgReact || null,
+    thread: sanitizeThread(pruneThread(prof)),          // v3.25 replies + heard flags
     dayMoves: ownDayMoves(prof, 'athlete'), // her this-week reschedules/skips, for the coach
     sportLogs: (prof.sportLogs || []).filter(s => s.date >= cut).slice(-90).map(sanitizeCardioLog),
     prs: prof.prs || {},
@@ -4950,6 +5035,7 @@ async function coachSyncTick(prof, force) {
     const full = await syncRpc('lo_pull', { p_key: co.key });
     if (full && full.progress) {
       co.progress = full.progress; co.progressRev = full.progressRev; co.progressAt = full.progressAt;
+      if (full.progress && full.progress.thread) mergeThread(prof, full.progress.thread);   // v3.25 their replies
       // her reschedules land in the workspace so "their week" reads true. Her entries
       // are by:'athlete', so the coach's outgoing plan doc (coach-only) is untouched
       // and this never re-triggers a plan push by itself.
@@ -5174,7 +5260,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.24.0';
+const APP_VERSION = '3.25.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5391,7 +5477,7 @@ function whyFor(prof, pe, t, ctx) {
   if (ctx.easy) return 'Easy week — lighter on purpose, so you come back stronger';
   if (ctx.rm && ctx.rm.mod < 1) return `You checked in low today, so this is eased off${ctx.rm.label ? ' — ' + U.esc(ctx.rm.label) : ''}`;
   if (ctx.rm && ctx.rm.mod > 1) return 'You checked in feeling good — nudged up a touch';
-  if (t.isNew) return 'First time on this one — pick a weight you could stop 2 reps short with';
+  if (t.isNew) return 'First time on this one — pick a weight you could stop 2 reps short of failing with';
   const st = (prof.exState || {})[pe.exId] || {};
   const y = st.why;
   if (!y) return '';
@@ -6392,6 +6478,8 @@ function renderWorkoutEx(prof, e, ei) {
     `${plan.sets} sets × ${plan.repsMin}–${plan.repsMax} reps${ex.unilateral ? ' each side' : ''}`;
   // v3.21 — the "why" replaces the old first-time hint when we have a better reason
   const whyLine = e.why ? `<div class="wo-why"><span class="wo-why-q">why</span>${U.esc(e.why)}</div>` : '';
+  // v3.25 — a note pinned to this lift plays right here, mid-session
+  const vnLine = (!prof.isCoach ? vnForExercise(prof, ex.id).slice(0, 1) : []).map(n => vnBubbleHtml(prof, n, { hideRef: true })).join('');
   const hint = (!e.why && e.isNew && !ex.bw) ? `<div class="wo-target" style="color:#C2400C">First time — pick a weight that leaves ~2 reps in the tank</div>` : '';
   const lastP = lastPerformance(prof, ex.id);
   const lastLine = (App.vsLast && lastP) ? `<div class="wo-last">Last time: ${U.esc(lastP.str)} · ${U.fmtDateShort(lastP.date)}</div>` : '';
@@ -6413,6 +6501,7 @@ function renderWorkoutEx(prof, e, ei) {
       <button class="iconbtn" data-a="wo-how" data-ex="${ex.id}" title="How to">${IC('play')}</button>
       <button class="iconbtn" data-a="wo-swap" data-ei="${ei}" title="Swap">${IC('swap')}</button>
     </div>
+    ${vnLine}
     <div class="sets">${warmupRows}
       ${e.sets.map((s, si) => `
       <div class="setrow">
@@ -7613,6 +7702,52 @@ function dispatch(e) {
     App._scrollTop = true; render(); return;
   }
   if (a === 'sheet-back') { sheetBack(); return; }
+  // ---- v3.25 voice notes ----
+  if (a === 'vn-open') {
+    const ref = { kind: el.dataset.kind || 'general' };   // only carry the keys that anchor it
+    if (el.dataset.ex) ref.exId = el.dataset.ex;
+    if (el.dataset.d != null && el.dataset.d !== '') ref.d = +el.dataset.d;
+    if (el.dataset.label) ref.label = el.dataset.label;
+    App.vnDraft = { ref, audio: null, text: '', sec: 0, state: 'idle' };
+    sheetGo('Notes', showVoiceSheet, prof, ref);
+    return;
+  }
+  if (a === 'vn-thread') { sheetRoot('Notes', showThreadSheet, prof); return; }
+  if (a === 'vn-start') {
+    const v = App.vnDraft; if (!v) return;
+    v.state = 'rec'; v.sec = 0; renderVoiceSheet(prof);
+    VNRec.start(
+      sec => { if (App.vnDraft && App.vnDraft.state === 'rec') { App.vnDraft.sec = sec; const b = document.querySelector('[data-a="vn-stop"]'); if (b) b.innerHTML = `<span class="vn-dot"></span>Stop · ${sec}s`; } },
+      audio => { if (!App.vnDraft) return; App.vnDraft.audio = audio; App.vnDraft.sec = audio.sec; App.vnDraft.state = 'done'; renderVoiceSheet(prof); },
+      err => { if (!App.vnDraft) return; App.vnDraft.state = 'idle'; renderVoiceSheet(prof);
+        toast(err === 'mic' ? 'Microphone permission is needed to record' : err === 'big' ? 'That clip is too long to send — try a shorter one' : 'Couldn’t record on this device'); }
+    );
+    return;
+  }
+  if (a === 'vn-stop') { VNRec.stop(); return; }
+  if (a === 'vn-scrap') { VNRec.cancel(); App.vnDraft.audio = null; App.vnDraft.sec = 0; App.vnDraft.state = 'idle'; renderVoiceSheet(prof); return; }
+  if (a === 'vn-cancel') { VNRec.cancel(); App.vnDraft = null; if (sheetHasBack()) sheetBack(); else closeSheet(); return; }
+  if (a === 'vn-preview') { vnPlay(App.vnDraft.audio, el); return; }
+  if (a === 'vn-play') {
+    const n = ensureThread(prof).find(x => x.id === el.dataset.id);
+    if (!n || !n.audio) return;
+    if (n.from === 'coach' && !prof.isCoach && !n.seen) { n.seen = true; if (prof.coachSync) prof.coachSync.pendingProgress = true; saveApp(); }
+    vnPlay(n.audio, el);
+    return;
+  }
+  if (a === 'vn-send') {
+    const v = App.vnDraft; if (!v || (!v.audio && !(v.text || '').trim())) return;
+    VNRec.cancel();   // sending a typed line mid-record must not leave the mic open
+    vnAdd(prof, { from: prof.isCoach ? 'coach' : 'athlete', ref: v.ref,
+      text: (v.text || '').trim().slice(0, 300), audio: v.audio || null, sec: v.sec || 0, seen: false });
+    App.vnDraft = null;
+    if (prof.isCoach) coachMaybeDirty(prof);
+    else if (prof.coachSync) { prof.coachSync.pendingProgress = true; if (typeof syncTick === 'function') setTimeout(() => syncTick(true), 800); }
+    saveApp(); render();
+    if (sheetHasBack()) sheetBack(); else closeSheet();
+    toast('Note sent');
+    return;
+  }
   if (a === 'roster-tab') { App.rosterTab = el.dataset.v === 'weeks' ? 'weeks' : 'triage'; App._scrollTop = true; render(); return; }
   if (a === 'rw-week') { App.rosterWeek = el.dataset.v === 'this' ? 'this' : 'next'; render(); return; }
   if (a === 'rw-open') {   // open that client's week sheet without leaving the roster
@@ -8013,7 +8148,8 @@ function showBuilderSheet(prof) {
         <b class="cwv ${pe.w == null ? 'auto' : ''}" data-a="cw-typein" data-i="${i}" data-f="w" title="Tap to type — or leave on Auto">${pe.w != null ? U.fmtW(pe.w, prof.units) + U.unitLabel(prof.units) : 'Auto'}</b>
         <button class="wstep" data-a="cw-wstep" data-i="${i}" data-d="1">+</button>
         ${pe.w != null ? `<button class="cwx-auto" data-a="cw-wclear" data-i="${i}">↺ Auto</button>` : `<span class="cwx-hint">progression sets it</span>`}</div>` : ''}
-      ${prof.isCoach ? `<input class="cwx-note" data-i="${i}" placeholder="Note for this exercise — e.g. slow 3s down" maxlength="200" value="${U.esc(pe.note || '')}">` : ''}
+      ${prof.isCoach ? `<input class="cwx-note" data-i="${i}" placeholder="Note for this exercise — e.g. slow 3s down" maxlength="200" value="${U.esc(pe.note || '')}">
+      <button class="cwx-vn" data-a="vn-open" data-kind="exercise" data-ex="${ex.id}">${IC('chat')} Voice note on ${U.esc(ex.name)}</button>` : ''}
       ${App.vsLast ? vsLastLineHtml(prof, pe.exId) : ''}
     </div>`;
   }).join('');
@@ -9713,6 +9849,17 @@ function renderCoachHome(prof) {
       <div class="row"><h3>This week's changes</h3></div>${s}
       <button class="btn sm ghost mt8" data-a="dm-adjust-open">Adjust their week</button></div>` : ''; })()}
     <div class="card">
+      <div class="row"><h3>Notes</h3><span class="spacer"></span>
+        ${(() => { const n = threadSorted(prof).filter(x => x.from === 'athlete' && !x.seen).length;
+          return n ? `<span class="tag hot">${n} new</span>` : ''; })()}</div>
+      <p class="muted mt8" style="font-size:12.5px;line-height:1.5">Record a voice note — pin it to an exercise and they'll hear it at that lift, mid-session.</p>
+      ${(() => { const th = threadSorted(prof).slice(0, 2); return th.length ? `<div class="mt8">${th.map(n => vnBubbleHtml(prof, n)).join('')}</div>` : ''; })()}
+      <div class="row mt8" style="gap:7px">
+        <button class="btn dark sm" data-a="vn-open">${IC('chat')} Record a note</button>
+        <button class="btn ghost sm" data-a="vn-thread">All notes</button>
+      </div>
+    </div>
+    <div class="card">
       <div class="row"><h3>Message on their Today screen</h3></div>
       <textarea class="ob-input" id="co-msg" rows="2" maxlength="500" placeholder="e.g. Big week — focus on slow reps. Proud of you" style="width:100%;margin-top:10px;resize:vertical;font-size:14px">${U.esc(prof.coachMsg || '')}</textarea>
       <button class="btn sm dark mt8" data-a="co-msg-save">Send message</button>
@@ -9821,7 +9968,151 @@ function coachPlanCardHtml(prof) {
   </div>`;
 }
 
+/* ============================================================
+   v3.25 — VOICE NOTES, ANCHORED TO THE TRAINING
+   A coach can record ~30s and pin it to a specific exercise, a day, or the
+   athlete generally. It surfaces where it's useful — at that exercise mid-session
+   — rather than in a chat tab nobody opens. The athlete can reply the same way.
+
+   Audio rides the existing sync docs as a base64 data URL, so this needs no new
+   infrastructure; the trade-off is that clips must stay small, which is why
+   recording is hard-capped and the thread is pruned before every push.
+============================================================ */
+const VN_MAX_SEC = 30;                 // hard stop on recording length
+const VN_MAX_BYTES = 160 * 1024;       // ~160KB of base64 per clip
+const VN_KEEP_AUDIO = 8;               // only the newest few clips carry audio on the wire
+const VN_KEEP_NOTES = 40;              // thread length cap
+
+function ensureThread(prof) {
+  if (!Array.isArray(prof.coachThread)) prof.coachThread = [];
+  return prof.coachThread;
+}
+/* newest first, so the UI can just take the head */
+const threadSorted = prof => ensureThread(prof).slice()
+  .sort((a, b) => (b.at || 0) - (a.at || 0) || String(b.id || '').localeCompare(String(a.id || '')));
+
+/* human label for what a note is pinned to */
+function vnRefLabel(prof, ref) {
+  if (!ref || !ref.kind || ref.kind === 'general') return '';
+  if (ref.kind === 'exercise') return U.esc((EX_BY_ID[ref.exId] || {}).name || ref.exId);
+  if (ref.kind === 'day') return WEEKDAYS_FULL[+ref.d] || '';
+  if (ref.kind === 'session') return ref.label ? U.esc(ref.label) : 'that session';
+  return '';
+}
+function vnAdd(prof, note) {
+  const th = ensureThread(prof);
+  /* keep stamps strictly increasing: two notes in the same millisecond must
+     still read in the order they were sent, here and after a sync */
+  const last = th.reduce((m, n) => Math.max(m, n.at || 0), 0);
+  const at = Math.max(Date.now(), last + 1);
+  th.push(Object.assign({ id: U.uid(), at, seen: false }, note));
+  pruneThread(prof);
+  return th[th.length - 1];
+}
+/* keep storage bounded: trim the thread, and strip audio off older clips */
+function pruneThread(prof) {
+  const th = ensureThread(prof);
+  th.sort((a, b) => (a.at || 0) - (b.at || 0));
+  if (th.length > VN_KEEP_NOTES) th.splice(0, th.length - VN_KEEP_NOTES);
+  const withAudio = th.filter(n => n.audio);
+  if (withAudio.length > VN_KEEP_AUDIO) {
+    withAudio.slice(0, withAudio.length - VN_KEEP_AUDIO).forEach(n => { delete n.audio; n.expired = true; });
+  }
+  return th;
+}
+/* notes pinned to a given exercise that the athlete hasn't heard yet */
+function vnForExercise(prof, exId) {
+  return threadSorted(prof).filter(n => n.from === 'coach' && n.ref && n.ref.kind === 'exercise' && n.ref.exId === exId);
+}
+function vnForDay(prof, d) {
+  return threadSorted(prof).filter(n => n.from === 'coach' && n.ref && n.ref.kind === 'day' && +n.ref.d === +d);
+}
+const vnUnheard = prof => ensureThread(prof).filter(n => n.from === 'coach' && !n.seen).length;
+
+/* ---- recorder ---------------------------------------------------------- */
+const VNRec = {
+  rec: null, chunks: [], startedAt: 0, iv: null, stream: null,
+  supported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && typeof MediaRecorder !== 'undefined'); },
+  async start(onTick, onDone, onError) {
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) { onError && onError('mic'); return false; }
+    let mime = '';
+    for (const m of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']) {
+      if (typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(m)) { mime = m; break; }
+    }
+    try {
+      this.rec = new MediaRecorder(this.stream, Object.assign({ audioBitsPerSecond: 24000 }, mime ? { mimeType: mime } : {}));
+    } catch (e) { this._release(); onError && onError('rec'); return false; }
+    this.chunks = []; this.startedAt = Date.now();
+    this.rec.ondataavailable = e => { if (e.data && e.data.size) this.chunks.push(e.data); };
+    this.rec.onstop = () => {
+      const sec = Math.round((Date.now() - this.startedAt) / 1000);
+      const blob = new Blob(this.chunks, { type: this.chunks[0] ? this.chunks[0].type : (mime || 'audio/webm') });
+      this._release();
+      const fr = new FileReader();
+      fr.onload = () => {
+        const data = String(fr.result || '');
+        if (data.length > VN_MAX_BYTES) { onError && onError('big'); return; }
+        onDone && onDone({ data, mime: blob.type, sec: Math.max(1, sec) });
+      };
+      fr.onerror = () => onError && onError('read');
+      fr.readAsDataURL(blob);
+    };
+    this.rec.start();
+    this.iv = setInterval(() => {
+      const s = Math.round((Date.now() - this.startedAt) / 1000);
+      onTick && onTick(s);
+      if (s >= VN_MAX_SEC) this.stop();
+    }, 250);
+    return true;
+  },
+  stop() { if (this.iv) { clearInterval(this.iv); this.iv = null; } if (this.rec && this.rec.state !== 'inactive') this.rec.stop(); },
+  cancel() { if (this.iv) { clearInterval(this.iv); this.iv = null; }
+    if (this.rec && this.rec.state !== 'inactive') { this.rec.onstop = null; this.rec.stop(); } this._release(); },
+  _release() { if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } this.rec = null; },
+};
+
+/* ---- one playable note -------------------------------------------------- */
+/* a note sent ten minutes ago shouldn't be stamped with today's date */
+function vnWhen(at) {
+  if (!at) return '';
+  const mins = Math.round((Date.now() - at) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  if (mins < 60 * 20) return Math.round(mins / 60) + 'h ago';
+  return U.fmtDateShort(new Date(at).toISOString().slice(0, 10));
+}
+function vnBubbleHtml(prof, n, opts) {
+  const mine = n.from === (prof.isCoach ? 'coach' : 'athlete');
+  const who = n.from === 'coach' ? (prof.isCoach ? 'You' : U.esc(prof.coachName || 'Your coach'))
+    : (prof.isCoach ? U.esc((prof.coachOf || {}).athleteName || 'They') : 'You');
+  const ref = vnRefLabel(prof, n.ref);
+  const when = vnWhen(n.at);
+  return `<div class="vn ${mine ? 'mine' : ''}${n.seen || mine ? '' : ' unheard'}">
+    <div class="vn-top"><b>${who}</b>${ref && !(opts && opts.hideRef) ? `<span class="vn-ref">${ref}</span>` : ''}<span class="spacer"></span><span class="vn-when">${when}</span></div>
+    ${n.audio ? `<button class="vn-play" data-a="vn-play" data-id="${n.id}">
+        <span class="vn-ic">▶</span><span class="vn-bars">${Array.from({ length: 14 }, (_, i) => `<i style="height:${5 + ((i * 7 + (n.sec || 5) * 3) % 13)}px"></i>`).join('')}</span>
+        <span class="vn-sec">${n.audio.sec || n.sec || 0}s</span>
+      </button>` : n.expired ? `<div class="vn-gone">Voice note expired</div>` : ''}
+    ${n.text ? `<div class="vn-tx">${U.esc(n.text)}</div>` : ''}
+  </div>`;
+}
+
 function coachMsgCardHtml(prof) {
+  // v3.25 — unheard voice/text notes take priority over the old one-liner
+  const unheard = threadSorted(prof).filter(n => n.from === 'coach' && !n.seen);
+  if (unheard.length) {
+    return `<div class="card coach-card vn-card">
+      <div class="ic">${IC('chat')}</div>
+      <div style="flex:1"><div class="tt">${U.esc(prof.coachName || 'Your coach')} left ${unheard.length === 1 ? 'a note' : unheard.length + ' notes'}</div>
+        <div class="mt8">${unheard.slice(0, 2).map(n => vnBubbleHtml(prof, n)).join('')}</div>
+        <div class="row mt8" style="gap:7px">
+          <button class="btn ghost sm" data-a="vn-thread">All notes</button>
+          <button class="btn ghost sm" data-a="vn-open">Reply</button>
+        </div></div>
+    </div>`;
+  }
   if (!prof.coachMsg || prof.coachMsgSeen) return '';
   return `<div class="card coach-card" style="border:1.5px solid #E7DEFF;background:#FBF9FF">
     <div class="ic">${IC('chat')}</div>
@@ -9832,6 +10123,72 @@ function coachMsgCardHtml(prof) {
       <button class="btn ghost sm" data-a="co-dismiss-msg">Got it</button>
     </div></div>
   </div>`;
+}
+
+/* one <audio> at a time, so tapping a second note stops the first */
+let _vnAudio = null;
+function vnPlay(audio, btn) {
+  if (!audio || !audio.data) return;
+  document.querySelectorAll('.vn-play.playing').forEach(b => b.classList.remove('playing'));
+  if (_vnAudio) { try { _vnAudio.pause(); } catch (e) {} _vnAudio = null; }
+  const a = new Audio(audio.data);
+  _vnAudio = a;
+  if (btn) {
+    btn.classList.add('playing');
+    a.onended = () => { btn.classList.remove('playing'); _vnAudio = null; };
+    a.onerror = () => { btn.classList.remove('playing'); _vnAudio = null; toast('Couldn’t play that note'); };
+  }
+  a.play().catch(() => { if (btn) btn.classList.remove('playing'); toast('Tap again to play'); });
+}
+
+/* the record sheet — pick what it's about, hold the button, send */
+function showVoiceSheet(prof, ref) {
+  App.vnDraft = App.vnDraft || { ref: ref || { kind: 'general' }, audio: null, text: '', sec: 0, state: 'idle' };
+  renderVoiceSheet(prof);
+}
+function renderVoiceSheet(prof) {
+  const v = App.vnDraft;
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const to = isCoach ? U.esc(prof.coachOf.athleteName) : U.esc(prof.coachName || 'your coach');
+  const refLabel = vnRefLabel(prof, v.ref);
+  const canRec = VNRec.supported();
+  const rec = v.state === 'rec';
+  showSheet(`<h3 style="font-size:19px;font-weight:900">${v.audio ? 'Ready to send' : 'Voice note'}
+      <span class="muted" style="font-size:13px;font-weight:600">· to ${to}</span></h3>
+    ${refLabel ? `<div class="cq-target" style="margin-top:8px">About · ${refLabel}</div>`
+      : `<p class="muted mt8" style="margin-bottom:2px">A general note — it'll show on their Today screen.</p>`}
+
+    ${!canRec ? `<div class="coach-note" style="margin-top:12px">This device won't let the app record audio. You can still send a written note.</div>` : `
+    <div class="vn-rec ${rec ? 'on' : ''}">
+      ${v.audio
+        ? `<button class="vn-play big" data-a="vn-preview"><span class="vn-ic">▶</span> Play it back <span class="vn-sec">· ${v.sec}s</span></button>
+           <button class="btn ghost sm mt8" data-a="vn-scrap">Record again</button>`
+        : `<button class="vn-btn ${rec ? 'on' : ''}" data-a="${rec ? 'vn-stop' : 'vn-start'}">
+             <span class="vn-dot"></span>${rec ? `Stop · ${v.sec}s` : 'Tap to record'}
+           </button>
+           <div class="vn-hint">${rec ? `Recording… stops automatically at ${VN_MAX_SEC}s` : `Up to ${VN_MAX_SEC} seconds`}</div>`}
+    </div>`}
+
+    <textarea class="ob-input" id="vn-text" rows="2" maxlength="300" placeholder="Add a line of text too (optional)" style="width:100%;margin-top:12px;resize:vertical;font-size:14px;font-weight:500;padding:11px">${U.esc(v.text || '')}</textarea>
+
+    <button class="btn primary block mt12" data-a="vn-send" ${(!v.audio && !(v.text || '').trim()) ? 'disabled style="opacity:.5"' : ''}>Send to ${to}</button>
+    <button class="btn ghost block mt8" data-a="vn-cancel">Cancel</button>`);
+  const t = document.getElementById('vn-text');
+  if (t) t.addEventListener('input', () => { App.vnDraft.text = t.value; });
+}
+
+/* the full conversation, newest first */
+function showThreadSheet(prof) {
+  const th = threadSorted(prof);
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const other = isCoach ? U.esc(prof.coachOf.athleteName) : U.esc(prof.coachName || 'your coach');
+  ensureThread(prof).forEach(n => { if (n.from === (isCoach ? 'athlete' : 'coach')) n.seen = true; });
+  saveApp();
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Notes with ${other}</h3>
+    <p class="muted mt8" style="margin-bottom:10px">${th.length ? 'Newest first. Anything pinned to an exercise also shows up during that session.' : 'Nothing yet — send the first one.'}</p>
+    <div class="mt8 vn-thread">${th.length ? th.map(n => vnBubbleHtml(prof, n)).join('') : ''}</div>
+    <button class="btn primary block mt12" data-a="vn-open">${IC('chat')} Record a note</button>
+    <button class="btn ghost block mt8" data-a="sheet-close">Close</button>`);
 }
 
 /* ============ day moves — "life happened" reschedule/skip, both sides ============ */

@@ -366,6 +366,9 @@ svg.i { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em;
 .coachbar .cb-who { font-weight: 900; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .coachbar .cb-sw { display: inline-flex; align-items: center; min-height: 30px; color: currentColor; font-weight: 800; font-size: 12px; background: rgba(255,255,255,0.18); border-radius: 999px; padding: 0 13px; flex: none; }
 .coachbar .cb-sw:active { opacity: .6; }
+.coachbar.mine { background: var(--fill); color: var(--ink2); border-bottom: 1px solid var(--line); }
+.coachbar.mine .cb-pip { background: var(--ink3); }
+.coachbar.mine .cb-sw { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
 body.coach-mode .tabs button.on { color: var(--violet); }
 body.coach-mode .tabs button.on svg { stroke: var(--violet); }
 /* v3.21 — coach rails */
@@ -4960,7 +4963,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.22.0';
+const APP_VERSION = '3.22.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -5435,11 +5438,16 @@ function coachBarHtml(prof) {
   if (!prof) return '';
   const onRoster = App.view === 'roster';
   const co = prof.isCoach && prof.coachOf;
-  if (!co && !onRoster) return '';
-  const who = onRoster && !co ? `${coachClients().length} athletes` : U.esc(co.athleteName);
-  return `<div class="coachbar">
+  const clients = coachClients();
+  // If you both coach and train, the switch is ALWAYS one tap away — and the bar
+  // says which hat you're wearing. No coaching relationship at all → no bar.
+  if (!co && !onRoster && !clients.length) return '';
+  const coaching = !!co || onRoster;
+  const who = onRoster && !co ? `${clients.length} ${U.plural(clients.length, 'athlete')}`
+    : co ? U.esc(co.athleteName) : U.esc(prof.name);
+  return `<div class="coachbar${coaching ? '' : ' mine'}">
     <span class="cb-pip"></span>
-    <span class="cb-lb">Coaching</span>
+    <span class="cb-lb">${coaching ? 'Coaching' : 'My training'}</span>
     <span class="cb-who">${who}</span>
     <span class="spacer"></span>
     <button class="cb-sw" data-a="co-switch">Switch ▾</button>
@@ -9141,7 +9149,7 @@ function coachAction(a, el, prof) {
   }
   if (a === 'co-myprofile') {
     const mine = Object.values(App.data.profiles).find(p => !p.isCoach);
-    if (mine) { App.data.activeProfileId = mine.id; App.view = 'today'; saveApp(); render(); }
+    if (mine) { App.data.activeProfileId = mine.id; App.view = 'today'; App._scrollTop = true; closeSheet(); saveApp(); render(); }
     return true;
   }
   if (a === 'co-create') {

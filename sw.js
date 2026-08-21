@@ -2,14 +2,15 @@
    Strategy: network-first for the app page (updates always land when online,
    cached copy serves offline); cache-first for static assets (icons, manifest).
    Cache name is versioned; bump VERSION together with APP_VERSION at release. */
-const VERSION = '3.30.0';
+const VERSION = '3.31.0';
 const CACHE = 'liftoff-v' + VERSION;
 const ART = ['./air_squat.webp', './assisted_dip.webp', './assisted_pullup.webp', './back_ext.webp', './bb_backsquat.webp', './bench_bb.webp', './bench_db.webp', './birddog.webp', './bulg_split.webp', './cable_fly.webp', './cable_kickback.webp', './cable_pullthrough.webp', './calf_raise.webp', './chestsup_row.webp', './crunch.webp', './curl_bb.webp', './curl_db.webp', './db_fly.webp', './deadbug.webp', './deadlift_bb.webp', './dips.webp', './facepull.webp', './farmer_carry.webp', './front_squat.webp', './glute_bridge.webp', './goblet_squat.webp', './goodmorning.webp', './hack_squat.webp', './hammer_curl.webp', './hang_kneeraise.webp', './hip_abduction.webp', './hipthrust_bb.webp', './incline_db.webp', './inverted_row.webp', './kb_swing.webp', './lat_raise.webp', './leg_curl.webp', './leg_ext.webp', './leg_press.webp', './legraise.webp', './lunge_bw.webp', './lunge_db.webp', './machine_chest.webp', './machine_hipthrust.webp', './machine_latraise.webp', './mount_climber.webp', './oh_tri_ext.webp', './ohp_bb.webp', './ohp_db.webp', './pike_pushup.webp', './plank.webp', './pulldown.webp', './pullover_db.webp', './pullup.webp', './pushdown.webp', './pushup.webp', './rdl_bb.webp', './rdl_db.webp', './reardelt_fly.webp', './row_bb.webp', './row_cable.webp', './row_db.webp', './russian_twist.webp', './seated_legcurl.webp', './shrug_db.webp', './side_plank.webp', './skullcrusher.webp', './sl_rdl.webp', './stepup_db.webp', './superman.webp', './upright_row_db.webp', './walking_lunge_db.webp'];
+const MG = ['./mg_f_arms.webp', './mg_f_arms_hi.webp', './mg_f_back.webp', './mg_f_back_hi.webp', './mg_f_calves.webp', './mg_f_calves_hi.webp', './mg_f_chest.webp', './mg_f_chest_hi.webp', './mg_f_core.webp', './mg_f_core_hi.webp', './mg_f_glutes.webp', './mg_f_glutes_hi.webp', './mg_f_hams.webp', './mg_f_hams_hi.webp', './mg_f_quads.webp', './mg_f_quads_hi.webp', './mg_f_shoulders.webp', './mg_f_shoulders_hi.webp', './mg_m_arms.webp', './mg_m_arms_hi.webp', './mg_m_back.webp', './mg_m_back_hi.webp', './mg_m_calves.webp', './mg_m_calves_hi.webp', './mg_m_chest.webp', './mg_m_chest_hi.webp', './mg_m_core.webp', './mg_m_core_hi.webp', './mg_m_glutes.webp', './mg_m_glutes_hi.webp', './mg_m_hams.webp', './mg_m_hams_hi.webp', './mg_m_quads.webp', './mg_m_quads_hi.webp', './mg_m_shoulders.webp', './mg_m_shoulders_hi.webp'];
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE)
-    .then(c => c.addAll(ASSETS).then(() => Promise.allSettled(ART.map(u => c.add(u)))))
+    .then(c => c.addAll(ASSETS).then(() => Promise.allSettled(ART.concat(MG).map(u => c.add(u)))))
     .then(() => self.skipWaiting()));
 });
 

@@ -56,6 +56,8 @@
   --chart-grid: rgba(37, 42, 49, 0.10);
   --chart-axis: #858B96;
   --mm-hi: #5B6B82;
+  --cat-scrim-mid: rgba(248, 249, 251, 0.72);
+  --cat-scrim-0: rgba(248, 249, 251, 0);
   --mm-2: #8697AE;
   --grad: #5B6B82;          /* flat — gradients retired for the calm look */
   --grad-soft: rgba(91, 107, 130, 0.11);
@@ -107,6 +109,8 @@
   --chart-grid: rgba(255, 255, 255, 0.10);
   --chart-axis: #8D94A0;
   --mm-hi: #8FA6C6;
+  --cat-scrim-mid: rgba(35, 38, 44, 0.72);
+  --cat-scrim-0: rgba(35, 38, 44, 0);
   --mm-2: #6E88AE;
   --grad: #8FA6C6;
   --grad-soft: rgba(143, 166, 198, 0.16);
@@ -155,6 +159,8 @@
   --chart-grid: rgba(255, 255, 255, 0.10);
   --chart-axis: #8D94A0;
   --mm-hi: #8FA6C6;
+  --cat-scrim-mid: rgba(35, 38, 44, 0.72);
+  --cat-scrim-0: rgba(35, 38, 44, 0);
   --mm-2: #6E88AE;
   --grad: #8FA6C6;
   --grad-soft: rgba(143, 166, 198, 0.16);
@@ -1270,6 +1276,79 @@ button.pw-day { font-family: inherit; }
 .qs-cta{display:flex;align-items:center;justify-content:center;gap:9px;font-size:15.5px;font-weight:800;padding:15px 16px;margin-bottom:14px}
 .qs-cta .i{width:18px;height:18px}
 .ex-row .go{margin-left:auto;font-size:20px;font-weight:700;flex:none;padding-left:6px}
+</style>
+<style id="mgart-css">/* muscle category art v3.31 — two masks per group, painted in theme tokens
+
+   The source renders are a white figure with black line work and the target
+   muscle flooded slate. Painted as pictures they would only survive on a dark
+   background, so nothing here is a picture: each render ships as two alpha
+   masks (tools/build-muscle-art.py) and the fill comes from --ink and --mm-hi.
+   Light, dark and a future re-skin all follow for free.
+
+   Three layers make the depth: a soft light behind the figure, the muscle in
+   accent, the line work in ink over the top, with a scrim so the label stays
+   readable where it crosses the body. */
+.cat-grid{grid-template-columns:1fr 1fr;gap:12px}
+.cat-sq{position:relative;overflow:hidden;isolation:isolate;aspect-ratio:1/1.2;min-height:0;
+  padding:12px 13px;justify-content:flex-end;transition:transform .12s ease,box-shadow .12s ease}
+.cat-sq .fig{position:absolute;inset:0;z-index:0;pointer-events:none}
+/* 1 — the light the figure stands in */
+.cat-sq .fig::before{content:"";position:absolute;inset:-6% -12% 10% 12%;
+  background:radial-gradient(60% 54% at 60% 40%,var(--mm-hi),transparent 70%);opacity:.26}
+/* 2 and 3 — the muscle, then the drawing over it */
+.cat-sq .fig i{position:absolute;right:3%;bottom:21%;top:-2%;width:76%;display:block;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-size:contain;mask-size:contain;
+  -webkit-mask-position:bottom right;mask-position:bottom right;
+  transition:transform .16s cubic-bezier(.2,.7,.3,1)}
+.cat-sq .fig .hi{-webkit-mask-image:var(--mh);mask-image:var(--mh);background:var(--mm-hi);opacity:.9}
+.cat-sq .fig .ln{-webkit-mask-image:var(--ml);mask-image:var(--ml);background:var(--ink);opacity:.66}
+/* keeps the label off the ribcage */
+.cat-sq::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(105% 62% at 4% 104%,var(--surface) 12%,var(--cat-scrim-mid) 40%,var(--cat-scrim-0) 66%)}
+.cat-sq .lb,.cat-sq .ct{position:relative;z-index:2}
+.cat-sq .lb{font-size:16px;margin-top:0}
+.cat-sq:active{transform:scale(.985)}
+.cat-sq:active .fig i{transform:translateY(-3px) scale(1.03)}
+@media (prefers-reduced-motion:reduce){.cat-sq,.cat-sq .fig i{transition:none}}
+
+/* Nine muscle groups after the compound band leaves one tile stranded on its
+   own row. The last one goes full width rather than sitting there looking
+   like a mistake — and it corrects itself if a category is ever added. */
+.cat-grid .cat-sq:last-child:nth-child(even){grid-column:1/-1;aspect-ratio:auto;min-height:132px}
+.cat-grid .cat-sq:last-child:nth-child(even) .fig i{width:34%;right:6%;top:-6%;bottom:-6%;
+  -webkit-mask-position:center right;mask-position:center right}
+.cat-grid .cat-sq:last-child:nth-child(even) .fig::before{inset:-20% 2% -20% 52%}
+.cat-grid .cat-sq:last-child:nth-child(even)::after{
+  background:radial-gradient(70% 130% at 2% 100%,var(--surface) 16%,var(--cat-scrim-mid) 44%,var(--cat-scrim-0) 68%)}
+
+/* compound keeps its band, and borrows the back view as a watermark */
+.cat-sq.compound{aspect-ratio:auto;min-height:74px;padding:16px 15px;overflow:hidden}
+.cat-sq.compound::after{display:none}
+.cat-sq.compound .fig::before{display:none}
+.cat-sq.compound .fig .hi{display:none}
+.cat-sq.compound .fig i{width:34%;right:-5%;top:-40%;bottom:-40%;-webkit-mask-position:center;mask-position:center}
+.cat-sq.compound .fig .ln{background:var(--accent-ink);opacity:.24}
+.cat-sq.compound .fig .hi{display:block;background:var(--accent-ink);opacity:.12}
+
+/* the same figure, larger, once you are inside a category */
+.cat-head{position:relative;overflow:hidden;border-radius:var(--r);background:var(--paper);
+  border:1px solid var(--line);padding:12px 14px;min-height:78px}
+.cat-head .fig{position:absolute;inset:0;pointer-events:none}
+.cat-head .fig i{position:absolute;right:14px;top:-10%;bottom:-10%;width:112px;display:block;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-size:contain;mask-size:contain;
+  -webkit-mask-position:center right;mask-position:center right}
+.cat-head .fig .hi{-webkit-mask-image:var(--mh);mask-image:var(--mh);background:var(--mm-hi);opacity:.85}
+.cat-head .fig .ln{-webkit-mask-image:var(--ml);mask-image:var(--ml);background:var(--ink);opacity:.6}
+.cat-head>div{position:relative;z-index:1}
+.mg-chest{--ml:url(mg_f_chest.webp);--mh:url(mg_f_chest_hi.webp)}[data-sex=male] .mg-chest{--ml:url(mg_m_chest.webp);--mh:url(mg_m_chest_hi.webp)}
+.mg-back{--ml:url(mg_f_back.webp);--mh:url(mg_f_back_hi.webp)}[data-sex=male] .mg-back{--ml:url(mg_m_back.webp);--mh:url(mg_m_back_hi.webp)}
+.mg-shoulders{--ml:url(mg_f_shoulders.webp);--mh:url(mg_f_shoulders_hi.webp)}[data-sex=male] .mg-shoulders{--ml:url(mg_m_shoulders.webp);--mh:url(mg_m_shoulders_hi.webp)}
+.mg-arms{--ml:url(mg_f_arms.webp);--mh:url(mg_f_arms_hi.webp)}[data-sex=male] .mg-arms{--ml:url(mg_m_arms.webp);--mh:url(mg_m_arms_hi.webp)}
+.mg-core{--ml:url(mg_f_core.webp);--mh:url(mg_f_core_hi.webp)}[data-sex=male] .mg-core{--ml:url(mg_m_core.webp);--mh:url(mg_m_core_hi.webp)}
+.mg-glutes{--ml:url(mg_f_glutes.webp);--mh:url(mg_f_glutes_hi.webp)}[data-sex=male] .mg-glutes{--ml:url(mg_m_glutes.webp);--mh:url(mg_m_glutes_hi.webp)}
+.mg-quads{--ml:url(mg_f_quads.webp);--mh:url(mg_f_quads_hi.webp)}[data-sex=male] .mg-quads{--ml:url(mg_m_quads.webp);--mh:url(mg_m_quads_hi.webp)}
+.mg-hamstrings{--ml:url(mg_f_hams.webp);--mh:url(mg_f_hams_hi.webp)}[data-sex=male] .mg-hamstrings{--ml:url(mg_m_hams.webp);--mh:url(mg_m_hams_hi.webp)}
+.mg-calves{--ml:url(mg_f_calves.webp);--mh:url(mg_f_calves_hi.webp)}[data-sex=male] .mg-calves{--ml:url(mg_m_calves.webp);--mh:url(mg_m_calves_hi.webp)}
 </style>
 
 </head>
@@ -5698,7 +5777,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.30.0';
+const APP_VERSION = '3.31.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6099,6 +6178,9 @@ function render() {
   if (_elapsedIv) { clearInterval(_elapsedIv); _elapsedIv = null; }
   const app = $app();
   const prof = activeProfile();
+  // Which body the illustrations use. Same preference as the muscle map, set in
+  // onboarding and in Profile → Appearance, so all the artwork agrees.
+  document.documentElement.dataset.sex = (prof && prof.quiz && prof.quiz.bodySex) === 'male' ? 'male' : 'female';
   if (prof && prof.plan && prof.plan.weekPlan) pruneWeekPlan(prof);   // clear last week's one-off overrides
   if (!App.workout) App.woMin = false;               // heal the minimise flag if the workout ended
   const woActive = !!App.workout, woFull = woActive && !App.woMin;
@@ -7839,7 +7921,9 @@ function libBodyHtml(prof) {
     const meta = CATEGORIES.find(c => c.key === f.cat) || { label: f.cat, icon: 'target' };
     const list = exercisesInCategory(f.cat).filter(mineOK).sort((a, b) => a.lvl - b.lvl || a.name.localeCompare(b.name));
     return `<button class="switchback" data-a="lib-cat" data-v="">↩ All categories</button>
-      <div class="cat-head"><div><div class="nm">${U.esc(meta.label)}</div>
+      <div class="cat-head ${f.cat === 'compound' ? 'mg-back' : 'mg-' + f.cat}">
+        ${f.cat === 'compound' ? '' : '<span class="fig" aria-hidden="true"><i class="hi"></i><i class="ln"></i></span>'}
+        <div><div class="nm">${U.esc(meta.label)}</div>
         <div class="muted" style="font-size:12px">${list.length} ${U.plural(list.length, 'move')}${f.cat === 'compound' ? ' · big multi-joint lifts' : ' · anything that works the ' + U.esc(meta.label.toLowerCase())}</div></div></div>
       <div id="lib-list">${list.map(e => exRowHtml(e, 'ex-open')).join('') || '<div class="empty"><div class="e"></div>Nothing here with your kit — turn off “My kit only”.</div>'}</div>`;
   }
@@ -7847,7 +7931,11 @@ function libBodyHtml(prof) {
   return `<div class="cat-grid">
     ${CATEGORIES.map(c => {
       const n = exercisesInCategory(c.key).filter(mineOK).length;
-      return `<button class="cat-sq ${c.key === 'compound' ? 'compound' : ''}" data-a="lib-cat" data-v="${c.key}">
+      // compound has no anatomy of its own, so it borrows the back view as a
+      // watermark; every other tile gets its own two-mask figure.
+      const art = c.key === 'compound' ? 'mg-back' : 'mg-' + c.key;
+      return `<button class="cat-sq ${c.key === 'compound' ? 'compound' : ''} ${art}" data-a="lib-cat" data-v="${c.key}">
+        <span class="fig" aria-hidden="true"><i class="hi"></i><i class="ln"></i></span>
         <span class="lb">${U.esc(c.label)}</span><span class="ct">${n} ${U.plural(n, 'move')}</span>
       </button>`;
     }).join('')}

@@ -348,6 +348,26 @@ textarea.ob-input { font-family: inherit; }   /* textareas default to monospace 
 @keyframes vnpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
 .vn-hint { font-size: 11.5px; color: var(--ink2); margin-top: 9px; }
 .vn-card .mt8 .vn:last-child { margin-bottom: 0; }
+/* v3.29 — foresight */
+.fs-lift { display: flex; align-items: baseline; gap: 9px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.fs-lift:last-child { border-bottom: none; }
+.fs-nm { flex: 1; min-width: 0; font-size: 13px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-arc { flex: none; font-size: 12.5px; color: var(--ink2); }
+.fs-gain { flex: none; font-size: 12px; font-weight: 900; color: var(--ink3); min-width: 42px; text-align: right; }
+.fs-gain.up { color: var(--good-text); }
+.fs-flag { margin-top: 11px; padding: 9px 11px; border-radius: 10px; background: var(--warn-bg); color: var(--warn);
+  font-size: 12px; font-weight: 700; line-height: 1.45; }
+.fs-scn { display: grid; gap: 7px; margin-top: 12px; }
+.fs-scn > div { display: flex; align-items: baseline; gap: 9px; padding: 8px 11px; border-radius: 10px; background: var(--fill); }
+.fs-scn .lb { flex: 1; font-size: 12px; color: var(--ink2); font-weight: 700; }
+.fs-scn b { font-size: 14px; font-weight: 900; }
+.fs-note { padding: 9px 11px; border-radius: 10px; background: var(--fill); font-size: 12.5px;
+  line-height: 1.5; color: var(--ink2); margin-bottom: 7px; }
+.fs-note:last-child { margin-bottom: 0; }
+.fs-note b { color: var(--ink); }
+.fs-note.big { background: var(--coach-bg); color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.fs-note.deload { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+.fs-note.stall { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
 /* v3.28 — standards & projections */
 .std-row { padding: 11px 0; border-bottom: 1px solid var(--line); }
 .std-row:last-child { border-bottom: none; padding-bottom: 0; }
@@ -5661,7 +5681,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.28.0';
+const APP_VERSION = '3.29.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -7828,6 +7848,249 @@ function renderLibrary(prof) {
 
 /* ============ PROGRESS ============ */
 /* ============================================================
+   v3.29 — FORESIGHT: run the plan forward, and look backward
+   Every other app stores a plan as text. This one stores it as a
+   machine: applyProgression is deterministic, so the same code that
+   decides next week can decide the next twelve. Nothing here is a
+   model of the engine — it IS the engine, run forward on a clone.
+   ============================================================ */
+
+const SIM_WEEKS = 12;
+const _fsClone = o => JSON.parse(JSON.stringify(o || {}));
+
+/* the planned entry for a lift, so a replayed log knows its rep range and rails */
+function planExFor(sim, exId) {
+  for (const d of ((sim.plan && sim.plan.days) || []))
+    for (const pe of (d.exercises || [])) if (pe.exId === exId) return pe;
+  return { exId, sets: 3, repsMin: 8, repsMax: 12 };
+}
+
+/* A scratch profile whose exState has been rebuilt by replaying real logs
+   through the real engine. This is what makes any of this work on the COACH's
+   phone, where exState is never synced — only the logs are. */
+function simProfileFrom(src, logs) {
+  const q = _fsClone(src.quiz);
+  // a synced quiz can arrive without the fields the engine indexes on; the
+  // simulation must degrade to a sane default rather than throw inside a render
+  if (!q.goal || !GOALS[q.goal]) q.goal = 'muscle';
+  if (!q.experience || !EXPERIENCE[q.experience]) q.experience = 'intermediate';
+  const sim = {
+    quiz: q, plan: _fsClone(src.plan || { days: [] }),
+    exState: {}, prs: {}, logs: [], readiness: {}, flags: {}, units: src.units || 'kg',
+  };
+  const seen = [];
+  for (const l of (logs || [])) {
+    const entries = (l.entries || []).map(e => ({
+      exId: e.exId, feel: e.feel || null, plan: e.plan || planExFor(sim, e.exId),
+      targetW: e.targetW != null ? e.targetW : null, coachSet: !!e.coachSet,
+      sets: (e.sets || []).map(s => ({ w: s.w, reps: s.reps, done: s.done !== false })),
+    }));
+    // capture what the ENGINE would have prescribed, before the log moves it on
+    for (const e of entries) {
+      if (!e.coachSet || e.targetW == null) continue;
+      const auto = nextTargets(sim, e.plan).w;
+      if (auto != null) seen.push({ exId: e.exId, date: l.date, coach: e.targetW, auto });
+    }
+    applyProgression(sim, { date: l.date, entries });
+    sim.logs.push({ date: l.date, entries });
+  }
+  sim._interventions = seen;
+  return sim;
+}
+
+/* How a simulated session goes.
+   The naive version — assume every set gets completed — produces a straight line
+   to a 105kg overhead press, which is nonsense and would poison the whole idea.
+   Real lifters have a CEILING that rises slowly, and the sessions that exceed it
+   are the ones they miss. So each lift carries a capability (an honest estimate
+   of true 1RM) which grows at a rate set by training age, and a set only gets
+   completed if the 1RM it implies is inside that. The engine then does what it
+   really does — holds, then deloads — and the curve comes out looking like
+   training instead of like a spreadsheet.
+   Deterministic throughout: the same plan must always draw the same picture. */
+const FS_GROWTH = { beginner: 0.013, intermediate: 0.0065, advanced: 0.003 };   // per week, of 1RM
+const FS_MODE_F = { hits: 1.35, typical: 1.0, rough: 0.55 };
+function _fsPerform(entries, mode, sessionIdx, hardEvery, missEvery, cap) {
+  return entries.map(e => {
+    const pe = e.plan || {};
+    const ex = EX_BY_ID[e.exId];
+    const target = e.sets.length ? e.sets[0].reps : (pe.repsMin || 8);
+    const w = e.sets.length ? (e.sets[0].w || 0) : 0;
+    let reps = target;   // she completes what was prescribed; the mode moves the CEILING, not the reps
+    let feel = null;
+
+    // can she actually do it? only meaningful for loaded, rep-based work
+    if (ex && !ex.bw && !ex.timed && w > 0 && cap && cap[e.exId] != null) {
+      const need = e1rm(w, reps);
+      const have = cap[e.exId];
+      if (need > have) {
+        // over her head — drop reps until it fits, and it comes back rated hard
+        let r = reps;
+        while (r > 1 && e1rm(w, r) > have) r--;
+        reps = r; feel = 'hard';
+      } else if (need > have * 0.96) {
+        feel = 'hard';                      // right at the edge
+      }
+    }
+    if (mode === 'typical' && !feel && hardEvery && sessionIdx % hardEvery === hardEvery - 1) feel = 'hard';
+    if (mode === 'rough' && !feel && missEvery && sessionIdx % missEvery === missEvery - 1) {
+      reps = Math.max(1, (pe.repsMin || 8) - 1); feel = 'hard';
+    }
+    return { exId: e.exId, feel, plan: pe, targetW: e.targetW, coachSet: e.coachSet,
+      sets: e.sets.map(s => ({ w: s.w, reps, done: true })) };
+  });
+}
+
+/* how this athlete has ACTUALLY been training, so "likely" isn't a guess */
+function adherenceOf(logs) {
+  let n = 0, hard = 0;
+  for (const l of (logs || [])) for (const e of (l.entries || [])) { n++; if (e.feel === 'hard') hard++; }
+  const hardRate = n ? hard / n : 0.2;
+  return { n, hardRate, hardEvery: hardRate > 0.02 ? Math.max(2, Math.round(1 / hardRate)) : 0 };
+}
+
+/* Run the plan forward. Returns per-lift weekly weights plus what goes wrong. */
+function simulatePlan(src, logs, opts) {
+  const weeks = (opts && opts.weeks) || SIM_WEEKS;
+  const mode = (opts && opts.mode) || 'typical';
+  const sched = (src.quiz && src.quiz.weekSchedule) || {};
+  const plan = src.plan || { days: [] };
+  const dayMap = plan.dayMap || {};
+  const liftDays = [0, 1, 2, 3, 4, 5, 6].filter(d => (sched[d] || 'rest') === 'lift' && dayMap[d] != null);
+  if (!liftDays.length || !(plan.days || []).length) return null;
+
+  const sim = simProfileFrom(src, logs);
+  // a lift she has never logged has no engine weight yet — seed it with the same
+  // conservative estimate the app already displays as "~40kg", so a new athlete's
+  // projection starts from a real number instead of zero
+  for (const d of (plan.days || [])) for (const pe of (d.exercises || [])) {
+    const ex = EX_BY_ID[pe.exId];
+    if (!ex || ex.bw || ex.timed) continue;
+    const st = exState(sim, pe.exId);
+    if (st.w == null) st.w = pe.w != null ? pe.w : startWeightEst(sim, ex);
+  }
+  const adh = adherenceOf(logs);
+  const hardEvery = mode === 'typical' ? adh.hardEvery : 0;
+  const tracked = {};
+  for (const d of plan.days) for (const pe of (d.exercises || [])) {
+    const ex = EX_BY_ID[pe.exId];
+    if (ex && !ex.bw && !ex.timed) tracked[pe.exId] = true;
+  }
+  const series = {}, notes = [];
+  Object.keys(tracked).forEach(id => { series[id] = []; });
+
+  // what she can actually do today, per lift: her best demonstrated 1RM, or an
+  // estimate from the working weight if she has never been near a true max
+  const cap = {}, grow = {};
+  const expF = FS_GROWTH[(sim.quiz || {}).experience] || FS_GROWTH.intermediate;
+  const modeF = FS_MODE_F[mode] || 1;
+  for (const id of Object.keys(tracked)) {
+    const st = sim.exState[id];
+    const shown = bestE1rm(sim, id);
+    const logged = !!(st && st.history && st.history.length);
+    // A lift she has actually ground out: a working set is not a maximal one, so
+    // credit about two reps in reserve. A lift she has NEVER logged: the weight is
+    // startWeightEst, which is deliberately conservative and designed to be
+    // overtaken quickly — so give it real headroom and a novice's rate of gain,
+    // or the projection stalls on day one and reads as broken.
+    const fromWork = st && st.w != null ? e1rm(st.w, logged ? 10 : 12) * (logged ? 1 : 1.12) : null;
+    const v = Math.max(shown || 0, fromWork || 0);
+    if (v > 0) { cap[id] = v; grow[id] = (logged ? expF : FS_GROWTH.beginner) * modeF; }
+  }
+
+  const start = U.parseISO(weekKeyNext());
+  let sessionIdx = 0, flat = {};
+
+  for (let w = 0; w < weeks; w++) {
+    for (const id of Object.keys(cap)) cap[id] *= (1 + (grow[id] || expF * modeF));   // she gets stronger, slowly
+    for (const wd of liftDays) {
+      const day = plan.days[dayMap[wd]];
+      if (!day) continue;
+      const entries = buildEntries(sim, day.exercises);
+      const d = new Date(start); d.setDate(start.getDate() + w * 7 + wd);
+      const performed = _fsPerform(entries, mode, sessionIdx++, hardEvery, mode === 'rough' ? 3 : 0, cap);
+      applyProgression(sim, { date: _isoOf(d), entries: performed });
+      // the engine explains itself — catch the moments worth telling the coach about
+      for (const e of performed) {
+        const st = sim.exState[e.exId]; if (!st || !st.why) continue;
+        if (st.why.k === 'atcap' && !notes.some(n => n.k === 'cap' && n.exId === e.exId))
+          notes.push({ k: 'cap', exId: e.exId, week: w + 1, at: st.w });
+        if (st.why.k === 'deload' && !notes.some(n => n.k === 'deload' && n.exId === e.exId))
+          notes.push({ k: 'deload', exId: e.exId, week: w + 1, from: st.why.from, to: st.why.to });
+      }
+    }
+    for (const id of Object.keys(tracked)) {
+      const st = sim.exState[id];
+      const v = st && st.w != null ? st.w : null;
+      series[id].push(v);
+      const prev = series[id][series[id].length - 2];
+      if (v != null && prev != null && Math.abs(v - prev) < 0.01) flat[id] = (flat[id] || 0) + 1;
+      else flat[id] = 0;
+      if (flat[id] === 3 && !notes.some(n => n.k === 'stall' && n.exId === id))
+        notes.push({ k: 'stall', exId: id, week: w + 1, at: v });
+    }
+  }
+  const lifts = Object.keys(series)
+    .filter(id => series[id].some(v => v != null))
+    .map(id => {
+      const vals = series[id];
+      const first = vals.find(v => v != null), last = [...vals].reverse().find(v => v != null);
+      return { exId: id, name: (EX_BY_ID[id] || {}).name || id, vals, first, last, gain: (last || 0) - (first || 0) };
+    })
+    .sort((a, b) => b.gain - a.gain);
+  return { weeks, mode, lifts, notes, adherence: adh, sessions: sessionIdx };
+}
+
+/* What did the coaching actually buy? Replaying the real logs records, at each
+   coach-set prescription, what the engine would have called on its own. The
+   difference is the coach's hand on the dial, in kilos. */
+function coachingDelta(src, logs) {
+  const sim = simProfileFrom(src, logs);
+  const iv = sim._interventions || [];
+  if (!iv.length) return { n: 0 };
+  const byEx = {};
+  let sum = 0;
+  for (const x of iv) {
+    const d = x.coach - x.auto;
+    sum += d;
+    (byEx[x.exId] = byEx[x.exId] || { exId: x.exId, n: 0, sum: 0 });
+    byEx[x.exId].n++; byEx[x.exId].sum += d;
+  }
+  const rows = Object.values(byEx).map(r => ({ ...r, avg: r.sum / r.n,
+    name: (EX_BY_ID[r.exId] || {}).name || r.exId })).sort((a, b) => Math.abs(b.avg) - Math.abs(a.avg));
+  return { n: iv.length, avg: sum / iv.length, rows, from: iv[0].date, to: iv[iv.length - 1].date };
+}
+
+/* Does this athlete perform better with more rest? Group each lift's sessions by
+   the gap since the last time they did it, and compare. Says nothing until the
+   data can carry it — two gap buckets, two sessions each, minimum. */
+const _fsDays = (a, b) => Math.round((U.parseISO(b) - U.parseISO(a)) / 86400000);
+function recoveryCurve(src, logs, exId) {
+  const rows = [];
+  let prev = null;
+  for (const l of (logs || [])) {
+    for (const e of (l.entries || [])) {
+      if (e.exId !== exId) continue;
+      const done = (e.sets || []).filter(s => (s.w || 0) > 0 && (s.reps || 0) > 0);
+      if (!done.length) continue;
+      const best = done.reduce((a, s) => e1rm(s.w, s.reps) > e1rm(a.w, a.reps) ? s : a, done[0]);
+      if (prev) rows.push({ gap: _fsDays(prev, l.date), e1rm: e1rm(best.w, best.reps), feel: e.feel });
+      prev = l.date;
+    }
+  }
+  if (rows.length < 4) return { ok: false, why: 'thin', n: rows.length };
+  const short = rows.filter(r => r.gap <= 2), long = rows.filter(r => r.gap >= 3);
+  if (short.length < 2 || long.length < 2) return { ok: false, why: 'onepattern', short: short.length, long: long.length };
+  const mean = a => a.reduce((t, r) => t + r.e1rm, 0) / a.length;
+  const ms = mean(short), ml = mean(long);
+  const pct = ms > 0 ? (ml - ms) / ms * 100 : 0;
+  const hardShort = short.filter(r => r.feel === 'hard').length / short.length;
+  const hardLong = long.filter(r => r.feel === 'hard').length / long.length;
+  return { ok: true, short: short.length, long: long.length, ms, ml, pct,
+    better: pct > 3 ? 'long' : pct < -3 ? 'short' : 'same', hardShort, hardLong };
+}
+
+/* ============================================================
    v3.28 — STANDARDS & PROJECTIONS
    Two questions every lifter asks and most apps answer badly:
    "am I actually strong?" and "when will I hit X?".
@@ -7955,6 +8218,113 @@ function projectTo(prof, exId, targetKg) {
   const loL = _stdWhenLabel(lo), hiL = _stdWhenLabel(hi);
   return { weeks, lo, hi, perWeek: t.perWeek, r2: t.r2,
            label: loL === hiL ? loL : `${loL} – ${hiL}`, trend: t };
+}
+
+/* ---- the coach's view of all three ---- */
+function _fsSrc(prof) {
+  // whichever athlete this profile is about, and the logs we're entitled to
+  if (prof.isCoach && prof.coachOf && prof.coachOf.progress) {
+    const pg = prof.coachOf.progress;
+    return { src: { quiz: pg.quiz || {}, plan: prof.coachOf.plan || (prof.plan || { days: [] }), units: pg.units || 'kg' },
+             logs: pg.logs || [], who: (prof.coachOf.athleteName || 'They').split(' ')[0], isCoach: true };
+  }
+  return { src: prof, logs: prof.logs || [], who: 'You', isCoach: false };
+}
+
+function foresightCardHtml(prof) {
+  const { src, logs, who, isCoach } = _fsSrc(prof);
+  let sim = null;
+  try { sim = simulatePlan(src, logs, { mode: 'typical' }); }
+  catch (e) { sim = null; }   // never let a projection take the home screen down
+  if (!sim || !sim.lifts.length) {
+    return `<div class="card"><h3>Where this plan goes</h3>
+      <p class="muted mt8" style="line-height:1.55">Once there's a plan with lift days on it, this runs the progression engine twelve weeks forward and shows you where it lands — before ${isCoach ? 'you send it' : 'you start it'}.</p></div>`;
+  }
+  const top = sim.lifts.slice(0, 3);
+  const u = src.units || 'kg';
+  const worst = sim.notes.filter(n => n.k !== 'cap').slice(0, 1)[0] || sim.notes[0];
+  return `<div class="card fs-card"><div class="row"><h3>Where this plan goes</h3><span class="spacer"></span>
+      <span class="tag">${sim.weeks} weeks</span></div>
+    <p class="muted mt8" style="font-size:12px;line-height:1.5">Run through the same engine that writes ${isCoach ? 'their' : 'your'} sessions, at the rate ${isCoach ? who + ' has' : 'you have'} actually been training.</p>
+    <div class="mt12">${top.map(l => `<div class="fs-lift">
+      <span class="fs-nm">${U.esc(l.name)}</span>
+      <span class="fs-arc">${U.fmtW(l.first, u)} → <b>${U.fmtW(l.last, u)}${U.unitLabel(u)}</b></span>
+      <span class="fs-gain ${l.gain > 0 ? 'up' : ''}">${l.gain > 0 ? '+' : ''}${U.fmtW(l.gain, u)}</span>
+    </div>`).join('')}</div>
+    ${worst ? `<div class="fs-flag">${U.esc(fsNoteText(worst, u))}</div>` : ''}
+    <button class="btn primary block mt12" data-a="fs-open">See it in full ›</button>
+  </div>`;
+}
+
+function fsNoteText(n, u) {
+  const nm = (EX_BY_ID[n.exId] || {}).name || n.exId;
+  if (n.k === 'cap') return `${nm} hits the ceiling you set at week ${n.week} and stops there.`;
+  if (n.k === 'deload') return `${nm} deloads at week ${n.week}, ${U.fmtW(n.from, u)} → ${U.fmtW(n.to, u)}${U.unitLabel(u)}.`;
+  return `${nm} stops moving around week ${n.week}, at ${U.fmtW(n.at, u)}${U.unitLabel(u)}.`;
+}
+
+function showForesightSheet(prof) {
+  const { src, logs, who, isCoach } = _fsSrc(prof);
+  const u = src.units || 'kg';
+  const typical = simulatePlan(src, logs, { mode: 'typical' });
+  if (!typical) { closeSheet(); toast('No plan to run forward yet'); return; }
+  const best = simulatePlan(src, logs, { mode: 'hits' });
+  const rough = simulatePlan(src, logs, { mode: 'rough' });
+  const pick = App.fsLift && typical.lifts.some(l => l.exId === App.fsLift) ? App.fsLift : typical.lifts[0].exId;
+  const L = k => (k.lifts.find(l => l.exId === pick) || {});
+  const tl = L(typical), bl = L(best), rl = L(rough);
+  const labels = tl.vals.map((_, i) => 'wk ' + (i + 1));
+  const chart = Charts.line([
+    { label: 'If they hit it', pts: bl.vals.map((v, i) => ({ x: labels[i], y: v })) },
+    { label: 'At their rate', pts: tl.vals.map((v, i) => ({ x: labels[i], y: v })) },
+  ], { h: 168 });
+
+  const delta = coachingDelta(src, logs);
+  const rec = recoveryCurve(src, logs, pick);
+  const nm = (EX_BY_ID[pick] || {}).name || pick;
+
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Where this plan goes
+      <span class="muted" style="font-size:13px;font-weight:600">· ${typical.weeks} weeks</span></h3>
+
+    <select class="search mt12" id="fs-pick" style="padding:10px 12px">
+      ${typical.lifts.map(l => `<option value="${l.exId}" ${l.exId === pick ? 'selected' : ''}>${U.esc(l.name)}</option>`).join('')}
+    </select>
+    ${chart}
+    <div class="fs-scn">
+      <div><span class="lb">If they hit everything</span><b>${U.fmtW(bl.last, u)}${U.unitLabel(u)}</b></div>
+      <div><span class="lb">At the rate they train</span><b>${U.fmtW(tl.last, u)}${U.unitLabel(u)}</b></div>
+      <div><span class="lb">A rough month</span><b>${U.fmtW(rl.last, u)}${U.unitLabel(u)}</b></div>
+    </div>
+    <p class="muted mt8" style="font-size:11.5px;line-height:1.5">${typical.adherence.n
+      ? `"At the rate they train" uses ${who}${isCoach ? '’s' : 'r'} real record — ${Math.round(typical.adherence.hardRate * 100)}% of sets so far have come back rated hard.`
+      : 'No history yet, so the middle line assumes every session gets finished.'}</p>
+
+    ${typical.notes.length ? `<div class="cq-lb" style="margin-top:18px">What the engine will do about it</div>
+      <div class="mt8">${typical.notes.slice(0, 5).map(n => `<div class="fs-note ${n.k}">${U.esc(fsNoteText(n, u))}</div>`).join('')}</div>`
+      : `<div class="cq-lb" style="margin-top:18px">What the engine will do about it</div>
+         <div class="mt8"><div class="fs-note">Nothing stalls, caps out or deloads in ${typical.weeks} weeks — the plan runs clean.</div></div>`}
+
+    <div class="cq-lb" style="margin-top:18px">What the coaching bought</div>
+    <div class="mt8">${delta.n
+      ? `<div class="fs-note big">${isCoach ? 'Your' : 'Your coach’s'} ${delta.n} ${U.plural(delta.n, 'call')} ${delta.avg >= 0 ? 'ran' : 'held'} <b>${U.fmtW(Math.abs(delta.avg), u)}${U.unitLabel(u)}</b> ${delta.avg >= 0 ? 'above' : 'below'} what the engine would have prescribed alone.</div>
+        ${delta.rows.slice(0, 3).map(r => `<div class="fs-note">${U.esc(r.name)} · ${r.avg >= 0 ? '+' : '−'}${U.fmtW(Math.abs(r.avg), u)}${U.unitLabel(u)} across ${r.n} ${U.plural(r.n, 'session')}</div>`).join('')}`
+      : `<div class="fs-note">Nothing pinned by hand yet — every weight so far is the engine's own. Set a weight or a ceiling and this starts keeping score.</div>`}</div>
+
+    <div class="cq-lb" style="margin-top:18px">${U.esc(nm)} and rest</div>
+    <div class="mt8">${rec.ok
+      ? `<div class="fs-note big">${rec.better === 'long'
+          ? `${who} ${isCoach ? 'lifts' : 'lift'} <b>${Math.abs(rec.pct).toFixed(0)}% heavier</b> on three or more days' rest than on two.`
+          : rec.better === 'short' ? `Oddly, the shorter gaps are going better here — ${Math.abs(rec.pct).toFixed(0)}% heavier on two days than three.`
+          : `Rest length isn't making much difference on this one — ${Math.abs(rec.pct).toFixed(0)}% between short and long gaps.`}</div>
+         <div class="fs-note">${rec.short} ${U.plural(rec.short, 'session')} on ≤2 days · ${rec.long} on ≥3 days${rec.hardShort > rec.hardLong ? ' · the short gaps come back rated hard more often' : ''}</div>`
+      : `<div class="fs-note">${rec.why === 'onepattern'
+          ? 'Every session of this lift has had a similar gap before it, so there’s nothing to compare. Move a day around and this fills in.'
+          : `Needs a few more sessions of this lift before the gaps say anything (${rec.n || 0} so far).`}</div>`}</div>
+
+    <p class="muted mt12" style="font-size:11px;line-height:1.5">Projections run the real progression engine forward on a copy, against a ceiling that rises about ${(( { beginner: 1.3, intermediate: 0.65, advanced: 0.3 }[(src.quiz || {}).experience] ) || 0.65)}% a week for ${(src.quiz || {}).experience || 'intermediate'} training age — so sessions that get too far ahead of it come back missed, exactly as they would in the gym. No readiness check-ins and no deload weeks called by hand: it shows what the plan does, not what life does.</p>
+    <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
+  const sel = document.getElementById('fs-pick');
+  if (sel) sel.addEventListener('change', () => { App.fsLift = sel.value; showForesightSheet(prof); });
 }
 
 /* the card: where each big lift stands, and where it's heading */
@@ -8113,6 +8483,7 @@ function renderProgress(prof) {
       </select>` : ''}
       ${strengthChart}${bestLine}
     </div>
+    ${foresightCardHtml(prof)}
     ${standardsCardHtml(prof)}
     <div class="card">
       <h3>Weekly sets per muscle</h3>
@@ -8311,6 +8682,7 @@ function dispatch(e) {
     App._scrollTop = true; render(); return;
   }
   if (a === 'sheet-back') { sheetBack(); return; }
+  if (a === 'fs-open') { sheetRoot('Where this plan goes', showForesightSheet, prof); return; }
   // ---- v3.25 voice notes ----
   if (a === 'vn-open') {
     const ref = { kind: el.dataset.kind || 'general' };   // only carry the keys that anchor it
@@ -10529,6 +10901,7 @@ function renderCoachHome(prof) {
         <button class="btn sm" style="background:var(--fill);color:var(--ink)" data-a="co-showcode">Pair code</button>
       </div>
     </div>
+    ${foresightCardHtml(prof)}
     ${(() => { const s = dayMoveSummaryHtml(prof);
       const who = U.esc((prof.coachOf || {}).athleteName || 'they');
       return `<div class="card">

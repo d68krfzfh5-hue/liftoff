@@ -1167,6 +1167,95 @@ button.pw-day { font-family: inherit; }
 .cat-head .ic { font-size: 30px; }
 .cat-head .nm { font-family: var(--font-display); font-weight: 800; font-size: 22px; letter-spacing: -0.01em; }
 
+/* ============================================================
+   v3.34 — LAPTOP
+   Everything above this line was drawn for a thumb. A coach triaging
+   nine athletes is doing it at a desk, and until now that meant a 520px
+   phone column floating in the middle of a 1440px screen.
+   Nothing below changes a single render function's markup beyond two
+   wrappers: the app already emits self-contained cards, so the width is
+   a layout problem and layout is where it gets solved.
+============================================================ */
+
+/* --- tablet: just let the column breathe --- */
+@media (min-width: 720px) {
+  #app { max-width: 640px; }
+  .tabs { width: min(640px, 100%); }
+  .sheet { width: min(640px, 100%); }
+}
+
+/* --- laptop: navigation moves to a rail and the page gets real width --- */
+@media (min-width: 1000px) {
+  #app {
+    max-width: 1220px; padding: 26px 30px 60px;
+    display: flex; align-items: flex-start; gap: 30px;
+  }
+  .appmain { flex: 1 1 auto; min-width: 0; }
+  /* The nav is last in the DOM — so the keyboard reaches the content first —
+     and first on the screen. order does that without touching the markup. */
+  #app > .tabs { order: -1; flex: 0 0 228px; }
+
+  /* an edge-to-edge strip is a phone idea; here it is a card like everything else */
+  .coachbar { margin: 0 0 16px; border-radius: 12px; padding: 11px 16px; top: 26px; }
+
+  .tabs {
+    position: sticky; top: 26px; bottom: auto; left: auto; transform: none;
+    width: auto; flex-direction: column; gap: 3px;
+    background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
+    border-top: 0; padding: 0; z-index: 1;
+  }
+  .tabs button {
+    flex: 0 0 auto; grid-auto-flow: column; grid-template-columns: 24px 1fr;
+    justify-items: start; align-items: center; gap: 12px;
+    width: 100%; padding: 11px 14px; font-size: 14px; border-radius: 12px;
+    text-align: left; transition: background .12s ease, color .12s ease;
+  }
+  .tabs button:hover { background: var(--fill); color: var(--ink2); }
+  .tabs button.on { background: var(--surface); box-shadow: var(--shadow); color: var(--ink); }
+  .tabs button svg { width: 21px; height: 21px; }
+
+  /* a sheet at the bottom of a laptop screen is a long way from the eye */
+  .sheet {
+    top: 50%; bottom: auto; width: min(640px, 92vw); max-height: 84vh;
+    border-radius: 20px; padding: 20px 22px 24px;
+    transform: translate(-50%, -50%); animation: dlgin .2s cubic-bezier(.2,.9,.3,1);
+  }
+  .sheet .grab { display: none; }
+
+  /* The library has nine tiles and room for four across. #app for the extra
+     specificity: the tile rules live in a later stylesheet than this one. */
+  #app .cat-grid { grid-template-columns: repeat(4, 1fr); }
+  #app .cat-grid .cat-sq:last-child:nth-child(even) { grid-column: auto; aspect-ratio: 1/1.2; min-height: 0; }
+  #app .cat-grid .cat-sq:last-child:nth-child(even) .fig i { width: 76%; right: 3%; top: -2%; bottom: 21%;
+    -webkit-mask-position: bottom right; mask-position: bottom right; }
+  #app .cat-grid .cat-sq:last-child:nth-child(even) .fig::before { inset: -6% -12% 10% 12%; }
+  #app .cat-grid .cat-sq:last-child:nth-child(even)::after {
+    background: radial-gradient(105% 62% at 4% 104%, var(--surface) 12%, var(--cat-scrim-mid) 40%, var(--cat-scrim-0) 66%); }
+  #app .cat-grid .cat-sq.compound { grid-column: 1 / -1; }
+
+  /* card stacks flow into two balanced columns rather than one long scroll */
+  .cols2 { column-count: 2; column-gap: 22px; }
+  .cols2 > * { break-inside: avoid; page-break-inside: avoid; margin-bottom: 22px; }
+
+  /* a pointer deserves feedback a thumb never needed */
+  .card, .cat-sq, .ex-row { transition: box-shadow .14s ease, transform .14s ease; }
+  .ex-row:hover, .cat-sq:hover { box-shadow: var(--shadow-big); }
+}
+
+@media (min-width: 1000px) and (prefers-reduced-motion: reduce) {
+  .sheet { animation: none; }
+  .card, .cat-sq, .ex-row { transition: none; }
+}
+
+@keyframes dlgin {
+  from { opacity: 0; transform: translate(-50%, -47%) scale(.985); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* Keyboard users get a visible ring everywhere, which a touch-only app
+   never needed and a coach at a laptop cannot work without. */
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 8px; }
+
 /* v3.32 — session replay: one column per session, one bar per set */
 .sr-strip { display: flex; gap: 8px; align-items: flex-end; overflow-x: auto; padding: 4px 2px 2px;
   -webkit-overflow-scrolling: touch; }
@@ -5795,7 +5884,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.32.0';
+const APP_VERSION = '3.34.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6229,7 +6318,10 @@ function render() {
   // v3.22 — coaching is a MODE, and it must never be ambiguous which one you're in
   const inCoach = !!(prof.isCoach && prof.coachOf) || App.view === 'roster';
   document.body.classList.toggle('coach-mode', inCoach);
-  app.innerHTML = coachBarHtml(prof) + html + (woActive ? workoutResumeBarHtml(prof) : '') + renderTabs(prof);
+  // The content lives in its own element so a wide screen can put the nav
+  // beside it. On a phone .appmain is an ordinary block and changes nothing.
+  app.innerHTML = '<div class="appmain">' + coachBarHtml(prof) + html +
+    (woActive ? workoutResumeBarHtml(prof) : '') + '</div>' + renderTabs(prof);
   afterRender(prof);
   if (woActive) _miniElapsedTick(prof);              // keep the mini-bar clock live while browsing
   _restoreScroll(y);
@@ -11143,6 +11235,8 @@ function renderCoachHome(prof) {
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
     ${(() => { const pgp = pg && pg.program; const p = pgp && typeof pgp.n === 'number' ? pgp : prof.program;
       return p ? `<div style="margin-bottom:12px"><span class="prog-chip">${U.esc(programLabelFrom(p))}</span></div>` : ''; })()}
+    <!-- Everything below is a self-contained card, so on a wide screen it can flow into two balanced columns instead of one long scroll. -->
+    <div class="cols2">
     ${coachTriageHtml(prof)}
     <div class="card hero">
       <div class="kicker">THEIR PLAN</div>
@@ -11189,6 +11283,7 @@ function renderCoachHome(prof) {
     <div class="card"><h3>Pairing</h3>
       <p class="muted mt8">Ending this stops sync both ways. Nothing on either phone is deleted.</p>
       <button class="btn danger sm mt8" data-a="co-unpair">End coaching link</button>
+    </div>
     </div>
   </div>`;
 }

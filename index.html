@@ -1167,6 +1167,24 @@ button.pw-day { font-family: inherit; }
 .cat-head .ic { font-size: 30px; }
 .cat-head .nm { font-family: var(--font-display); font-weight: 800; font-size: 22px; letter-spacing: -0.01em; }
 
+/* v3.32 — session replay: one column per session, one bar per set */
+.sr-strip { display: flex; gap: 8px; align-items: flex-end; overflow-x: auto; padding: 4px 2px 2px;
+  -webkit-overflow-scrolling: touch; }
+.sr-col { flex: 0 0 auto; width: 46px; text-align: center; }
+.sr-bars { height: 62px; display: flex; align-items: flex-end; justify-content: center; gap: 2px;
+  padding: 0 2px; border-bottom: 1px solid var(--line-2); }
+.sr-bars i { display: block; width: 7px; border-radius: 2px 2px 0 0; background: var(--mm-hi); }
+.sr-bars i.back { background: var(--mm-hi); opacity: 0.42; }
+.sr-col.bad .sr-bars i.top { background: var(--danger); }
+.sr-col.bad .sr-bars i.back { background: var(--danger); opacity: 0.38; }
+.sr-w { font-family: var(--font-d); font-weight: 800; font-size: 12px; margin-top: 5px; }
+.sr-d { font-size: 9.5px; color: var(--ink3); font-weight: 700; letter-spacing: .01em; }
+.sr-key { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 10.5px;
+  font-weight: 700; color: var(--ink3); }
+.sr-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--mm-hi);
+  margin-right: 5px; vertical-align: -1px; }
+.sr-key i.back { opacity: 0.42; }
+
 /* v3.3 — program/week chip */
 .prog-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-d); font-weight: 800;
   font-size: 12.5px; letter-spacing: -0.01em; padding: 6px 12px; border-radius: 999px;
@@ -5777,7 +5795,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.31.0';
+const APP_VERSION = '3.32.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -10006,6 +10024,7 @@ const DEMO_SQUAD = [
   { n: 'Jack Doyle',    s: 'noplan',  goal: 'fitness',     exp: 'beginner',     sex: 'male',   bw: 78 },
   { n: 'Elena Marsh',   s: 'good',    goal: 'muscle',      exp: 'intermediate', sex: 'female', bw: 70 },
   { n: 'Dan Osei',      s: 'pr',      goal: 'performance', exp: 'advanced',     sex: 'male',   bw: 88 },
+  { n: 'Nadia Okafor',  s: 'fade',    goal: 'muscle',      exp: 'intermediate', sex: 'female', bw: 64 },
 ];
 const _dIso = n => { const d = new Date(); d.setDate(d.getDate() - n);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -10041,8 +10060,16 @@ function demoProgressDoc(spec) {
       // keep each demo story to ONE lift-group so the signal text matches its numbers
       if (spec.s === 'under' && i % 3 === 0 && xi === 0) { target = x.w + step * 4; coachSet = true; w = Math.round((target * 0.82) / 0.5) * 0.5; }
       if (spec.s === 'hard' && i % 3 === 0 && xi < 2) feel = 'hard';
-      return { exId: x.id, feel, targetW: target, coachSet,
-        sets: [{ w, reps }, { w, reps }, { w, reps: Math.max(5, reps - 1) }] };
+      let sets = [{ w, reps }, { w, reps }, { w, reps: Math.max(5, reps - 1) }];
+      // Nadia's bench holds its first set and loses the rest, worse every week.
+      // e1RM cannot see this — the top set never moves — so it exists to prove
+      // the set-by-set card and the 'fading' signal have something to say that
+      // nothing else in here does. back: 0 = newest week, 3 = oldest.
+      if (spec.s === 'fade' && x.id === 'bench_bb') {
+        sets = [[8, 5, 3], [8, 6, 4], [8, 7, 6], [8, 8, 7]][Math.min(back, 3)]
+          .map(r => ({ w, reps: r }));
+      }
+      return { exId: x.id, feel, targetW: target, coachSet, sets };
     });
     logs.push({ date: _dIso(off), dayName: day.name, durationMin: 38 + (i % 4) * 4,
       react: i === 0 && spec.s === 'hard' ? 'tough' : null, note: null, entries });
@@ -10146,6 +10173,101 @@ function coachExSeries(pg) {
   return map;
 }
 
+/* ============================================================
+   v3.32 — SESSION REPLAY
+   Everything the coach sees reduces a session to one number: the best
+   set. That throws away the only thing a set-by-set log actually knows —
+   the SHAPE of the session. Holding 4x8 and grinding 8,6,4,3 produce an
+   identical e1RM and mean completely different things, and only one of
+   them is a coach's problem.
+   The sets already arrive: the sync sends every {w, reps}. Nothing here
+   asks the athlete's phone for anything new.
+============================================================ */
+
+/* every logged instance of one lift, newest last, sets intact */
+function setReplay(pg, exId, n) {
+  const out = [];
+  for (const l of (pg.logs || [])) {
+    const e = (l.entries || []).find(x => x.exId === exId);
+    if (!e) continue;
+    const sets = (e.sets || []).filter(s => (s.reps || 0) > 0);
+    if (sets.length < 2) continue;                 // one set has no shape
+    out.push({ date: l.date, feel: e.feel || null, targetW: e.targetW,
+               sets: sets.map(s => ({ w: s.w || 0, reps: s.reps })) });
+  }
+  out.sort((a, b) => a.date < b.date ? -1 : 1);
+  return out.slice(-(n || 8));
+}
+
+/* How much of the first set survives to the last, 0 = held, 1 = nothing left.
+   Reps only: a session that drops the weight to keep reps is a different
+   story and the bars show it without needing a number. */
+function sessionFade(sess) {
+  const first = sess.sets[0].reps, last = sess.sets[sess.sets.length - 1].reps;
+  return first > 0 ? Math.max(0, (first - last) / first) : 0;
+}
+
+/* Which lift to show first: the one whose sets are falling away most, so
+   the card opens on the thing worth looking at rather than on whatever is
+   alphabetically first. */
+function replayLifts(pg) {
+  const ids = new Set();
+  for (const l of (pg.logs || [])) for (const e of (l.entries || [])) {
+    if ((e.sets || []).filter(s => (s.reps || 0) > 0).length >= 2) ids.add(e.exId);
+  }
+  return [...ids].map(id => {
+    const r = setReplay(pg, id, 3);
+    return { id, n: r.length, fade: r.length ? r.reduce((t, x) => t + sessionFade(x), 0) / r.length : 0 };
+  }).filter(x => x.n >= 1).sort((a, b) => b.fade - a.fade || a.n - b.n);
+}
+
+/* The card. Each session is a column, each bar a set, height = reps —
+   flat reads as held, a staircase reads as a fade, at a glance. */
+function setReplayHtml(prof) {
+  const co = prof.coachOf || {};
+  const pg = co.progress;
+  if (!pg) return '';
+  const lifts = replayLifts(pg);
+  if (!lifts.length) return '';
+  const pick = lifts.find(l => l.id === App.srLift) || lifts[0];
+  const sess = setReplay(pg, pick.id, 8);
+  if (!sess.length) return '';
+
+  const u = pg.units || 'kg';
+  const maxReps = Math.max(...sess.flatMap(x => x.sets.map(s => s.reps)), 1);
+  const who = U.esc(co.athleteName || 'They');
+  const last = sess[sess.length - 1];
+  const fade = sessionFade(last);
+  const worst = Math.max(...sess.map(sessionFade));
+
+  const read = fade >= 0.34 ? `Last time the sets fell away — ${last.sets.map(s => s.reps).join(', ')}.`
+    : worst >= 0.34 ? 'Held together last time, but it has come apart before.'
+    : 'The sets are holding their shape.';
+
+  return `<div class="card">
+    <div class="row"><h3>Set by set</h3><span class="spacer"></span>
+      ${fade >= 0.34 ? '<span class="tag hot">fading</span>' : '<span class="tag ok">holding</span>'}</div>
+    <p class="muted mt8" style="font-size:12.5px;line-height:1.5">${U.esc(read)}
+      Every other view shows ${who} one number a session; this is the whole session.</p>
+    ${lifts.length > 1 ? `<select class="search mt8" id="sr-lift" style="margin-bottom:8px;padding:10px 12px">
+      ${lifts.map(l => `<option value="${U.esc(l.id)}" ${l.id === pick.id ? 'selected' : ''}>${U.esc((EX_BY_ID[l.id] || {}).name || l.id)}</option>`).join('')}
+    </select>` : `<div class="kicker mt8">${U.esc((EX_BY_ID[pick.id] || {}).name || pick.id)}</div>`}
+    <div class="sr-strip">
+      ${sess.map(x => {
+        const topW = Math.max(...x.sets.map(s => s.w));
+        return `<div class="sr-col${sessionFade(x) >= 0.34 ? ' bad' : ''}">
+          <div class="sr-bars">${x.sets.map(s => `<i style="height:${Math.max(9, Math.round(s.reps / maxReps * 100))}%"
+            class="${s.w >= topW - 0.001 ? 'top' : 'back'}" title="${s.reps} reps @ ${U.fmtW(s.w, u)}${U.unitLabel(u)}"></i>`).join('')}</div>
+          <div class="sr-w">${topW ? U.fmtW(topW, u) : '–'}</div>
+          <div class="sr-d">${U.fmtDateShort(x.date)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="sr-key"><span><i class="top"></i> top weight</span><span><i class="back"></i> lighter</span>
+      <span class="spacer"></span>bar height = reps</div>
+  </div>`;
+}
+
 /* → [{kind, sev, mag, title, detail, act, actLabel}] ranked most-urgent first.
    sev 3 = needs you · 2 = worth a look · 1 = good news worth saying out loud */
 function computeSignals(pg, co) {
@@ -10229,6 +10351,32 @@ function computeSignals(pg, co) {
     out.push({ kind: 'stalled', sev: 2, mag: stalled.length,
       title: `${stalled.length === 1 ? 'A lift has' : `${stalled.length} lifts have`} stalled`,
       detail: `${list(stalled, 3)} — no gain over the last three sessions${stalled[0].w ? `, sitting at ${wFmt(stalled[0].w)}` : ''}. Time for a variation, a rep-range change, or a back-off week.`,
+      act: 'tab-plan', actLabel: 'Adjust their plan' });
+  }
+
+  /* --- fading: the top set holds but the rest of the session falls apart.
+     Invisible to every other check here, because e1RM only ever sees the
+     best set — a session can look identical week to week while the work
+     underneath it quietly halves. --- */
+  const fading = [];
+  for (const id of Object.keys(series)) {
+    const r = setReplay(pg, id, 6);
+    if (r.length < 3) continue;
+    const recent = r.slice(-3), before = r.slice(0, -3);
+    const avg = a => a.reduce((t, x) => t + sessionFade(x), 0) / a.length;
+    const now = avg(recent);
+    if (now < 0.34) continue;                                  // holding well enough
+    const topHeld = recent[2].sets[0].reps >= recent[0].sets[0].reps;  // the first set is fine
+    const grew = !before.length || now - avg(before) >= 0.10;
+    if (topHeld && grew) fading.push({ id, now, last: recent[2] });
+  }
+  if (fading.length) {
+    fading.sort((a, b) => b.now - a.now);
+    const f = fading[0];
+    out.push({ kind: 'fading', sev: 2, mag: Math.round(f.now * 100),
+      title: `${fading.length === 1 ? 'A lift is' : `${fading.length} lifts are`} falling away after the first set`,
+      bare: 'Sets falling away',
+      detail: `${list(fading, 2)} — first set is still there, the rest is not. Last time it went ${f.last.sets.map(x => x.reps).join(', ')}. Usually too little rest, too much on the bar, or a session that has grown too long.`,
       act: 'tab-plan', actLabel: 'Adjust their plan' });
   }
 
@@ -11006,6 +11154,7 @@ function renderCoachHome(prof) {
       </div>
     </div>
     ${foresightCardHtml(prof)}
+    ${setReplayHtml(prof)}
     ${(() => { const s = dayMoveSummaryHtml(prof);
       const who = U.esc((prof.coachOf || {}).athleteName || 'they');
       return `<div class="card">
@@ -11901,6 +12050,7 @@ document.body.addEventListener('click', dispatch);
 
 document.body.addEventListener('change', e => {
   if (e.target && e.target.id === 'chart-ex') { App.chartEx = e.target.value; render(); }
+  if (e.target && e.target.id === 'sr-lift') { App.srLift = e.target.value; render(); }
 });
 document.body.addEventListener('input', e => {
   if (e.target && e.target.id === 'lib-q') {

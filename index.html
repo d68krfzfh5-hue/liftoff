@@ -5215,6 +5215,10 @@ function buildPlanDoc(prof) { // coach workspace → athlete
       exercises: (c.exercises || []).map(packPe),
     })),
     customMap: prof.customMap || {},
+    // v3.29.1 — WHICH workout sits on WHICH weekday is a coach decision (ds-workout
+    // writes it), but it was never sent, so the athlete recomputed her own and the
+    // two phones silently disagreed about what Friday is.
+    dayMap: (plan.dayMap && typeof plan.dayMap === 'object') ? plan.dayMap : null,
     dayMoves: ownDayMoves(prof, 'coach'), // coach's this-week move/skip adjustments
     weekPlan: packWeekPlan(prof),         // coach's per-week (e.g. next-week) plan overrides
     cardio: sanitizeCardio((prof.plan || {}).cardio),   // v3.23 prescribed cardio / other sessions
@@ -5312,6 +5316,17 @@ function sanitizeCardioLog(l) {
   };
 }
 
+/* a day→plan-index map off the wire: weekdays 0-6 pointing at real days only */
+function sanitizeDayMap(raw, nDays) {
+  if (!raw || typeof raw !== 'object' || !nDays) return null;
+  const out = {};
+  for (const [wd, idx] of Object.entries(raw)) {
+    const d = +wd, i = +idx;
+    if (!(d >= 0 && d <= 6) || !Number.isInteger(i) || i < 0 || i >= nDays) continue;
+    out[d] = i;
+  }
+  return Object.keys(out).length ? out : null;
+}
 function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/PRs/history untouched
   const days = (doc.days || []).map(d => ({
     name: d.name || 'Workout', focus: Array.isArray(d.focus) ? d.focus : [],
@@ -5324,7 +5339,9 @@ function applyPlanDoc(prof, doc, rev) { // runs on the athlete's phone — logs/
   prof.plan.daysPerWeek = U.clamp(+doc.daysPerWeek || days.length, 1, 7);
   prof.plan.coachRev = rev;
   if (doc.weekSchedule && typeof doc.weekSchedule === 'object') prof.quiz.weekSchedule = doc.weekSchedule;
-  prof.plan.dayMap = assignDayMap(prof.plan, prof.quiz.weekSchedule);
+  // adopt the coach's day→workout mapping when they sent one; only fall back to
+  // computing our own for a coach still on an older build
+  prof.plan.dayMap = sanitizeDayMap(doc.dayMap, days.length) || assignDayMap(prof.plan, prof.quiz.weekSchedule);
   prof.plan.weekPlan = unpackWeekPlan(doc.weekPlan); // adopt the coach's per-week overrides
   prof.plan.cardio = sanitizeCardio(doc.cardio);     // v3.23 — and their cardio / other sessions
   if (doc.thread) mergeThread(prof, doc.thread);     // v3.25 — and any notes they've sent
@@ -5681,7 +5698,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.29.0';
+const APP_VERSION = '3.29.1';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }

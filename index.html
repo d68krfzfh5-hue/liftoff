@@ -348,6 +348,24 @@ textarea.ob-input { font-family: inherit; }   /* textareas default to monospace 
 @keyframes vnpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
 .vn-hint { font-size: 11.5px; color: var(--ink2); margin-top: 9px; }
 .vn-card .mt8 .vn:last-child { margin-bottom: 0; }
+/* v3.28 — standards & projections */
+.std-row { padding: 11px 0; border-bottom: 1px solid var(--line); }
+.std-row:last-child { border-bottom: none; padding-bottom: 0; }
+.std-row:first-child { padding-top: 0; }
+.std-top { display: flex; align-items: center; gap: 9px; }
+.std-nm { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.std-band { flex: none; font-size: 10.5px; font-weight: 900; letter-spacing: .4px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; background: var(--fill-2); color: var(--ink2); }
+.std-band.b1 { background: var(--rest-bg); color: var(--brand-ink); }
+.std-band.b2 { background: var(--coach-bg); color: var(--violet-ink); }
+.std-band.b3 { background: var(--good-bg); color: var(--good-text); }
+.std-band.b4 { background: var(--warn-bg); color: var(--warn); }
+.std-rail { height: 5px; border-radius: 999px; background: var(--fill-2); margin-top: 8px; overflow: hidden; }
+.std-rail i { display: block; height: 100%; border-radius: 999px; background: var(--grad); }
+.std-meta { font-size: 11.5px; color: var(--ink2); margin-top: 6px; line-height: 1.45; }
+.std-when { display: inline-block; margin-top: 5px; font-size: 11px; font-weight: 800; color: var(--violet); }
+.std-when.flat { color: var(--ink3); font-weight: 700; }
+[data-theme="dark"] .std-band.b3 { color: var(--good-text); }
 /* v3.26 — pick a day to move a session to */
 .dm-targets { margin-top: 8px; }
 .dm-t { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; margin-bottom: 7px; padding: 11px 13px; border-radius: 12px; background: var(--fill); min-height: 48px; }
@@ -5643,7 +5661,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.27.3';
+const APP_VERSION = '3.28.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -7809,6 +7827,193 @@ function renderLibrary(prof) {
 }
 
 /* ============ PROGRESS ============ */
+/* ============================================================
+   v3.28 — STANDARDS & PROJECTIONS
+   Two questions every lifter asks and most apps answer badly:
+   "am I actually strong?" and "when will I hit X?".
+   Both are pure computation on exState.history + bodyweight, so
+   there is nothing to sync and nothing to get wrong at rest.
+
+   The ratios below are population approximations, not a governing
+   body's table — the UI says as much. They exist to give a lifter a
+   sense of scale, not a certificate. Only lifts where a bodyweight
+   ratio is actually meaningful get one; everything else is skipped
+   rather than fudged.
+   ============================================================ */
+const STD_BANDS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
+const STD_RATIOS = {   // est. 1RM ÷ bodyweight at the FLOOR of each band
+  bb_backsquat: { m: [0.75, 1.25, 1.60, 2.10, 2.60], f: [0.50, 0.85, 1.15, 1.55, 2.00] },
+  front_squat:  { m: [0.60, 1.00, 1.30, 1.70, 2.10], f: [0.40, 0.70, 0.95, 1.25, 1.60] },
+  deadlift_bb:  { m: [1.00, 1.50, 2.00, 2.50, 3.00], f: [0.60, 1.00, 1.35, 1.80, 2.30] },
+  rdl_bb:       { m: [0.85, 1.25, 1.65, 2.05, 2.50], f: [0.50, 0.85, 1.15, 1.50, 1.90] },
+  bench_bb:     { m: [0.50, 0.80, 1.10, 1.50, 1.90], f: [0.30, 0.50, 0.70, 0.95, 1.25] },
+  ohp_bb:       { m: [0.35, 0.55, 0.75, 0.95, 1.20], f: [0.20, 0.35, 0.50, 0.65, 0.85] },
+  row_bb:       { m: [0.50, 0.80, 1.05, 1.30, 1.60], f: [0.30, 0.50, 0.70, 0.90, 1.15] },
+};
+const stdHasRatio = exId => !!STD_RATIOS[exId];
+
+/* newest logged bodyweight, in kg — the standards are meaningless without it */
+function bodyweightKg(prof) {
+  const logs = (prof && prof.bodyLogs) || [];
+  if (!logs.length) return null;
+  const newest = logs.reduce((a, b) => (!a || b.date > a.date) ? b : a, null);
+  return newest && newest.w > 0 ? newest.w : null;
+}
+/* One series of estimated 1RMs for a lift, whoever is asking.
+   The athlete has exState.history; the COACH deliberately never receives
+   exState (only exTop + logs), so derive the same series from the logs.
+   Same numbers either way — e1rm() is the single definition. */
+function e1rmSeries(prof, exId) {
+  const st = (prof.exState || {})[exId];
+  const h = (st && st.history) || [];
+  if (h.length) return h.filter(x => (x.e1rm || 0) > 0).map(x => ({ date: x.date, e1rm: x.e1rm }));
+  const out = [];
+  for (const l of (prof.logs || [])) {
+    for (const e of (l.entries || [])) {
+      if (e.exId !== exId) continue;
+      const done = (e.sets || []).filter(x => x.done !== false && (x.w || 0) > 0 && (x.reps || 0) > 0);
+      if (!done.length) continue;
+      const best = done.reduce((a, x) => e1rm(x.w, x.reps) > e1rm(a.w, a.reps) ? x : a, done[0]);
+      out.push({ date: l.date, e1rm: e1rm(best.w, best.reps) });
+    }
+  }
+  return out.sort((a, b) => a.date < b.date ? -1 : 1);
+}
+/* best estimated 1RM this lift has ever shown */
+function bestE1rm(prof, exId) {
+  const best = e1rmSeries(prof, exId).reduce((m, x) => Math.max(m, x.e1rm || 0), 0);
+  return best > 0 ? best : null;
+}
+
+/* where this lift sits against bodyweight, and what the next rung costs */
+function standardFor(prof, exId) {
+  const row0 = STD_RATIOS[exId];
+  if (!row0) return null;
+  const bw = bodyweightKg(prof);
+  const e = bestE1rm(prof, exId);
+  if (!bw || !e) return null;
+  const row = (prof.quiz && prof.quiz.bodySex) === 'male' ? row0.m : row0.f;
+  const ratio = e / bw;
+  let idx = -1;
+  for (let i = 0; i < row.length; i++) if (ratio >= row[i] - 1e-9) idx = i;
+  const band = idx < 0 ? 'Getting started' : STD_BANDS[idx];
+  const next = idx + 1 < row.length
+    ? { band: STD_BANDS[idx + 1], kg: row[idx + 1] * bw }
+    : null;
+  // how far through the current band, for the little progress rail
+  const floor = idx < 0 ? 0 : row[idx] * bw;
+  const ceil = next ? next.kg : e;
+  const pct = next && ceil > floor ? Math.max(0, Math.min(100, Math.round((e - floor) / (ceil - floor) * 100))) : 100;
+  return { band, idx, ratio, e1rm: e, bw, next, toNext: next ? Math.max(0, next.kg - e) : 0, pct, top: !next };
+}
+
+/* least-squares trend through the estimated 1RMs, in kg per week.
+   Deliberately refuses to answer on thin or flat data — a confident wrong
+   prediction costs more trust than saying "not enough to go on yet". */
+const STD_MIN_POINTS = 4;
+const STD_MIN_SPAN_DAYS = 21;
+const STD_MAX_WEEKS_OUT = 26;
+function trendFor(prof, exId) {
+  const h = e1rmSeries(prof, exId).slice(-14);
+  if (h.length < STD_MIN_POINTS) return { ok: false, why: 'thin', points: h.length };
+  const t0 = U.parseISO(h[0].date).getTime();
+  const xs = h.map(x => (U.parseISO(x.date).getTime() - t0) / 86400000);
+  const ys = h.map(x => x.e1rm);
+  const span = xs[xs.length - 1];
+  if (span < STD_MIN_SPAN_DAYS) return { ok: false, why: 'short', span };
+  const n = xs.length;
+  const mx = xs.reduce((a, b) => a + b, 0) / n, my = ys.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) { const dx = xs[i] - mx, dy = ys[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+  if (sxx === 0) return { ok: false, why: 'flat', perWeek: 0 };
+  const slope = sxy / sxx;                       // kg per day
+  const r2 = syy === 0 ? 0 : (sxy * sxy) / (sxx * syy);
+  const perWeek = slope * 7;
+  if (perWeek < 0.15) return { ok: false, why: perWeek < -0.15 ? 'down' : 'flat', perWeek, r2 };
+  return { ok: true, perWeek, r2, points: n, spanDays: Math.round(span) };
+}
+
+const STD_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+const _stdPartOfMonth = d => d.getDate() <= 10 ? 'early' : d.getDate() <= 20 ? 'mid' : 'late';
+function _stdWhenLabel(weeks) {
+  const d = new Date(); d.setDate(d.getDate() + Math.round(weeks * 7));
+  return `${_stdPartOfMonth(d)} ${STD_MONTHS[d.getMonth()]}`;
+}
+/* when this lift reaches a target, hedged by how well the trend actually fits */
+function projectTo(prof, exId, targetKg) {
+  const cur = bestE1rm(prof, exId);
+  if (!cur || !(targetKg > 0)) return null;
+  if (cur >= targetKg) return { already: true };
+  const t = trendFor(prof, exId);
+  if (!t.ok) return { blocked: t.why, trend: t };
+  const weeks = (targetKg - cur) / t.perWeek;
+  if (weeks > STD_MAX_WEEKS_OUT) return { blocked: 'far', weeks, trend: t };
+  // a poor fit widens the window rather than pretending to a date
+  const spread = Math.max(1, Math.round(weeks * (1 - Math.min(0.95, t.r2)) * 0.9));
+  const lo = Math.max(0.5, weeks - spread), hi = weeks + spread;
+  const loL = _stdWhenLabel(lo), hiL = _stdWhenLabel(hi);
+  return { weeks, lo, hi, perWeek: t.perWeek, r2: t.r2,
+           label: loL === hiL ? loL : `${loL} – ${hiL}`, trend: t };
+}
+
+/* the card: where each big lift stands, and where it's heading */
+function standardsCardHtml(prof) {
+  const u = prof.units;
+  const rows = Object.keys(STD_RATIOS)
+    .map(id => ({ id, st: standardFor(prof, id) }))
+    .filter(x => x.st)
+    .sort((a, b) => b.st.ratio / (b.st.next ? 1 : 1) - a.st.ratio || 0);
+  const bw = bodyweightKg(prof);
+  const isCoach = !!(prof.isCoach && prof.coachOf);
+  const who = isCoach ? U.esc((prof.coachOf.athleteName || 'They').split(' ')[0]) : 'You';
+  const theyre = isCoach ? `${who} is` : 'You’re';
+
+  if (!bw) {
+    return `<div class="card"><h3>Where ${isCoach ? who + ' stands' : 'you stand'}</h3>
+      <p class="muted mt8" style="line-height:1.55">Strength standards compare a lift to bodyweight, so ${isCoach ? `${who} needs` : 'you need'} one bodyweight logged before this can say anything useful. ${isCoach ? 'It’s in their Body card on Progress.' : 'Pop it in the Body card below — once only is enough to start.'}</p>
+    </div>`;
+  }
+  if (!rows.length) {
+    return `<div class="card"><h3>Where ${isCoach ? who + ' stands' : 'you stand'}</h3>
+      <p class="muted mt8" style="line-height:1.55">Log a barbell squat, bench, deadlift, overhead press or row and this fills in — those are the lifts where a bodyweight ratio actually means something.</p>
+    </div>`;
+  }
+
+  const body = rows.map(({ id, st }) => {
+    const name = (EX_BY_ID[id] || {}).name || id;
+    const proj = st.next ? projectTo(prof, id, st.next.kg) : null;
+    const line = !st.next
+      ? `${theyre} at the top of the table on this one — standards stop here.`
+      : `${U.fmtW(st.toNext, u)}${U.unitLabel(u)} from <b>${st.next.band}</b>`;
+    let when = '';
+    if (proj && proj.label) {
+      when = `<span class="std-when">on this trend · ${U.esc(proj.label)}</span>`;
+    } else if (proj && proj.blocked === 'flat') {
+      when = `<span class="std-when flat">holding steady — no trend to read yet</span>`;
+    } else if (proj && proj.blocked === 'down') {
+      when = `<span class="std-when flat">easing off lately</span>`;
+    } else if (proj && proj.blocked === 'far') {
+      when = `<span class="std-when flat">more than six months out at this rate</span>`;
+    } else if (proj && (proj.blocked === 'thin' || proj.blocked === 'short')) {
+      when = `<span class="std-when flat">a few more sessions and I can call a date</span>`;
+    }
+    return `<div class="std-row">
+      <div class="std-top"><span class="std-nm">${U.esc(name)}</span>
+        <span class="std-band b${Math.max(0, st.idx)}">${U.esc(st.band)}</span></div>
+      <div class="std-rail"><i style="width:${st.pct}%"></i></div>
+      <div class="std-meta">est. 1RM <b>${U.fmtW(st.e1rm, u)}${U.unitLabel(u)}</b> · ${st.ratio.toFixed(2)}× bodyweight · ${line}</div>
+      ${when}
+    </div>`;
+  }).join('');
+
+  return `<div class="card"><div class="row"><h3>Where ${isCoach ? who + ' stands' : 'you stand'}</h3><span class="spacer"></span>
+      <span class="muted" style="font-size:11.5px">at ${U.fmtW(bw, u)}${U.unitLabel(u)}</span></div>
+    <div class="mt12">${body}</div>
+    <p class="muted mt12" style="font-size:11px;line-height:1.5">Bands are population averages for ${(prof.quiz && prof.quiz.bodySex) === 'male' ? 'men' : 'women'} at this bodyweight — a sense of scale, not a verdict. Dates assume the last few weeks continue, which is exactly the thing training is meant to change.</p>
+  </div>`;
+}
+
 function chartableExercises(prof) {
   return EXERCISES.filter(e => prof.exState[e.id] && prof.exState[e.id].history.length >= 2 && !e.timed)
     .sort((a, b) => prof.exState[b.id].history.length - prof.exState[a.id].history.length);
@@ -7908,6 +8113,7 @@ function renderProgress(prof) {
       </select>` : ''}
       ${strengthChart}${bestLine}
     </div>
+    ${standardsCardHtml(prof)}
     <div class="card">
       <h3>Weekly sets per muscle</h3>
       <div class="muted mt8" style="margin-bottom:6px">Last 7 days · green band = your target zone</div>
@@ -9314,14 +9520,16 @@ function v2Action(a, el, prof) {
    athlete raises a specific, recognisable signal.
 ============================================================ */
 const DEMO_SQUAD = [
-  { n: 'Sarah Chen',    s: 'quiet',   goal: 'muscle',      exp: 'intermediate' },
-  { n: 'Marcus Webb',   s: 'under',   goal: 'strength',    exp: 'intermediate' },
-  { n: 'Priya Patel',   s: 'stalled', goal: 'muscle',      exp: 'advanced' },
-  { n: 'Tom Bright',    s: 'hard',    goal: 'muscle',      exp: 'beginner' },
-  { n: 'Aisha Rahman',  s: 'flying',  goal: 'strength',    exp: 'intermediate' },
-  { n: 'Jack Doyle',    s: 'noplan',  goal: 'fitness',     exp: 'beginner' },
-  { n: 'Elena Marsh',   s: 'good',    goal: 'muscle',      exp: 'intermediate' },
-  { n: 'Dan Osei',      s: 'pr',      goal: 'performance', exp: 'advanced' },
+  // sex + bw give the standards card real numbers, and spread the bands so a
+  // coach sees the range rather than eight identical "Advanced" badges
+  { n: 'Sarah Chen',    s: 'quiet',   goal: 'muscle',      exp: 'intermediate', sex: 'female', bw: 61 },
+  { n: 'Marcus Webb',   s: 'under',   goal: 'strength',    exp: 'intermediate', sex: 'male',   bw: 84 },
+  { n: 'Priya Patel',   s: 'stalled', goal: 'muscle',      exp: 'advanced',     sex: 'female', bw: 57 },
+  { n: 'Tom Bright',    s: 'hard',    goal: 'muscle',      exp: 'beginner',     sex: 'male',   bw: 92 },
+  { n: 'Aisha Rahman',  s: 'flying',  goal: 'strength',    exp: 'intermediate', sex: 'female', bw: 66 },
+  { n: 'Jack Doyle',    s: 'noplan',  goal: 'fitness',     exp: 'beginner',     sex: 'male',   bw: 78 },
+  { n: 'Elena Marsh',   s: 'good',    goal: 'muscle',      exp: 'intermediate', sex: 'female', bw: 70 },
+  { n: 'Dan Osei',      s: 'pr',      goal: 'performance', exp: 'advanced',     sex: 'male',   bw: 88 },
 ];
 const _dIso = n => { const d = new Date(); d.setDate(d.getDate() - n);
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -9334,9 +9542,14 @@ function demoProgressDoc(spec) {
   const legs = [{ id: 'bb_backsquat', w: 80 }, { id: 'rdl_bb', w: 70 }, { id: 'leg_press', w: 120 }];
   const days = [{ name: 'Upper Push', ex: push }, { name: 'Lower', ex: legs }, { name: 'Upper Pull', ex: pull }];
   const logs = [], prs = {}, exTop = {};
-  // 9 sessions over ~3 weeks. A given lift recurs every 3rd session, so each has
-  // exactly 3 data points spanning ~14 days — enough for the stall/flying windows.
-  const offs = spec.s === 'quiet' ? [9, 11, 14, 16, 18, 21, 23, 25, 28] : [1, 3, 5, 8, 10, 12, 15, 17, 19];
+  // 12 sessions over ~4 weeks. A given lift recurs every 3rd session, so each has
+  // four data points — enough for the stall/flying windows AND for a projection.
+  // 12 sessions = FOUR points per lift spanning ~26 days, which clears the
+  // projection gates (>=4 points, >=21 days). The three oldest are appended, so
+  // the recent windows the v3.20 signals read are untouched.
+  const offs = spec.s === 'quiet'
+    ? [9, 11, 14, 16, 18, 21, 23, 25, 28, 30, 32, 35]
+    : [1, 3, 5, 8, 10, 12, 15, 17, 19, 22, 24, 26];
   offs.forEach((off, i) => {
     const day = days[i % 3];
     const back = Math.floor(i / 3);                  // 0 = newest week, 2 = oldest
@@ -9372,8 +9585,11 @@ function demoProgressDoc(spec) {
     v: 1, name: spec.n.split(' ')[0], emoji: '', units: 'kg',
     quiz: { goal: spec.goal, experience: spec.exp, daysPerWeek: 3, sessionMinutes: 60,
       equipment: ['barbell', 'dumbbell', 'machine', 'cable', 'bodyweight', 'bench'], focus: [],
-      athleteType: 'gym', sportLabel: '', weekSchedule: sched, videoPref: 'auto', bodySex: 'female' },
-    plan: null, logs, prs, exTop, sportLogs: [], bodyLogs: [], badges: {}, dayMoves: {},
+      athleteType: 'gym', sportLabel: '', weekSchedule: sched, videoPref: 'auto', bodySex: spec.sex || 'female' },
+    plan: null, logs, prs, exTop, sportLogs: [],
+    bodyLogs: [{ date: _dIso(24), w: (spec.bw || 70) + 0.8 }, { date: _dIso(10), w: (spec.bw || 70) + 0.3 },
+               { date: _dIso(3), w: spec.bw || 70 }],
+    badges: {}, dayMoves: {},
     msgReact: null, totals: { workouts: 20 + logs.length, since: _dIso(120) },
     program: { n: 2, start: U.weekKey(_dIso(14)) },
     appliedPlanRev: spec.s === 'noplan' ? 1 : 4,
@@ -9395,7 +9611,7 @@ function seedDemoSquad() {
       quiz: { goal: spec.goal, experience: spec.exp, daysPerWeek: 3, sessionMinutes: 60,
         equipment: ['barbell', 'dumbbell', 'machine', 'cable', 'bodyweight', 'bench'], focus: [],
         athleteType: 'gym', sportLabel: '', weekSchedule: { 0: 'lift', 1: 'rest', 2: 'lift', 3: 'rest', 4: 'lift', 5: 'rest', 6: 'rest' },
-        videoPref: 'auto', bodySex: 'female' },
+        videoPref: 'auto', bodySex: spec.sex || 'female' },
       program: { n: 2, start: U.weekKey(_dIso(14)) },
     };
     migrateProfile(p);
@@ -10362,6 +10578,8 @@ function renderCoachProgress(prof) {
   const volWk = shim.logs.filter(l => l.date >= wkStart).reduce((t, l) => t + l.entries.reduce((v, e) => v + e.sets.reduce((x, s) => x + (s.w || 0) * ((EX_BY_ID[e.exId] || {}).timed ? 0 : s.reps), 0), 0), 0);
   const prCount = Object.keys(shim.prs).length;
   const sessions = shim.logs.slice(-6).reverse();
+  // the coach sees the same standards card, worded for them
+  const stdShim = Object.assign({}, shim, { quiz: pg.quiz || {}, exState: {}, isCoach: true, coachOf: co });
   return `<div class="screen">
     <div class="hdr"><div><div class="hi">${U.esc(pg.name)}’s progress</div><div class="sub">shared ${co.progressAt ? U.fmtDateShort(String(co.progressAt).slice(0, 10)) : ''} · ${U.esc(syncStatusLine(co))}</div></div>
       <button class="iconbtn" data-a="co-sync-now" title="Sync now">↻</button></div>
@@ -10372,6 +10590,7 @@ function renderCoachProgress(prof) {
       <div class="tile"><div class="lb">Personal records</div><div class="v">${prCount}</div></div>
       <div class="tile"><div class="lb">Total workouts</div><div class="v">${pg.totals ? pg.totals.workouts : shim.logs.length}</div></div>
     </div>
+    ${standardsCardHtml(stdShim)}
     ${sessions.length ? `<div class="card"><h3>Recent sessions</h3><div class="mt8">
       ${sessions.map(l => {
         const top = l.entries.map(e => { const ex = EX_BY_ID[e.exId]; const w = Math.max(...e.sets.map(s => s.w || 0), 0); return ex && w > 0 ? `${ex.name} ${U.fmtW(w, shim.units)}` : null; }).filter(Boolean).slice(0, 2).join(' · ');

@@ -5019,6 +5019,14 @@ function accountCardHtml(prof) {
       </div>`
       : `<div class="muted mt8" style="font-size:12.5px">Roster not loaded — tap refresh, or check your connection.</div>`}
     ${localPairs().length ? `<button class="btn ghost block mt8" data-a="auth-relink">Link this phone’s ${localPairs().length} ${U.plural(localPairs().length, 'coaching code')} to my account</button>` : ''}
+    <div class="cq-lb" style="margin-top:16px">Link a coaching code</div>
+    <p class="muted" style="font-size:11.5px;line-height:1.45;margin-top:4px">Signed in somewhere that doesn’t have your training on it? Type the pair code in here instead — it attaches the same link to this account, from any device.</p>
+    <input class="ob-input" id="auth-code-key" type="text" autocomplete="off" spellcheck="false"
+      placeholder="LIFT-XXXXX-XXXXX-XXXXX-XXXXX" style="margin-top:8px;font-size:14px;font-weight:700;padding:11px">
+    <div class="row mt8" style="gap:7px">
+      <button class="btn sm ghost" data-a="auth-addcode" data-v="coach">I’m the coach</button>
+      <button class="btn sm ghost" data-a="auth-addcode" data-v="athlete">I’m the athlete</button>
+    </div>
     <div class="row mt8" style="gap:7px">
       <button class="btn sm ghost" data-a="auth-roster">Refresh roster</button>
       <button class="btn sm ghost" data-a="auth-signout">Sign out</button>
@@ -5635,7 +5643,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.27.1';
+const APP_VERSION = '3.27.2';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -8485,6 +8493,21 @@ function dispatch(e) {
   if (a === 'auth-relink') {
     el.disabled = true; el.textContent = 'Linking…';
     afterSignIn().finally(() => { el.disabled = false; render(); });
+    return;
+  }
+  if (a === 'auth-addcode') {
+    const keyEl = document.getElementById('auth-code-key');
+    const key = normalizePairKey(keyEl ? keyEl.value : '');
+    if (!key) { toast('That code doesn’t look complete — it’s 20 characters after LIFT-'); return; }
+    const side = el.dataset.v === 'athlete' ? 'athlete' : 'coach';
+    el.disabled = true; el.textContent = 'Linking…';
+    claimPair(key, side, null)
+      .then(r => {
+        if (r && r.ok) { toast(`Linked — you’re the ${side} on that one`); return refreshRoster(true).then(() => render()); }
+        toast(CLAIM_MSG[(r || {}).error] || 'Couldn’t link that code', 5000);
+      })
+      .catch(() => toast('Couldn’t reach the server — try again when you’re online'))
+      .finally(() => { el.disabled = false; el.textContent = side === 'athlete' ? 'I’m the athlete' : 'I’m the coach'; });
     return;
   }
   if (a === 'auth-roster') {

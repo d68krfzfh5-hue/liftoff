@@ -1191,6 +1191,10 @@ button.pw-day { font-family: inherit; }
     display: flex; align-items: flex-start; gap: 30px;
   }
   .appmain { flex: 1 1 auto; min-width: 0; }
+  /* Onboarding and the live workout screen replace the whole shell — no rail,
+     no wrapper — so they would otherwise stretch the full 1220px. A quiz
+     question and a set of reps both want a column, not a billboard. */
+  #app > *:not(.appmain):not(.tabs) { flex: 1 1 auto; min-width: 0; max-width: 780px; margin-inline: auto; }
   /* The nav is last in the DOM — so the keyboard reaches the content first —
      and first on the screen. order does that without touching the markup. */
   #app > .tabs { order: -1; flex: 0 0 228px; }

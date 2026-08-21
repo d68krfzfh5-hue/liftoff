@@ -3785,7 +3785,7 @@ function coachTips(profile) {
   const tips = [];
   const q = profile.quiz, logs = profile.logs || [];
   if (!logs.length) {
-    tips.push({ kind: 'start', icon: 'bolt', title: 'Ready for lift-off', text: 'Your plan is ready. First session: pick weights that feel like you could do 2 more reps at the end of each set — the app takes over from there.' });
+    tips.push({ kind: 'start', icon: 'bolt', title: 'Ready for lift-off', text: 'First session: pick weights you could do 2 more reps with. The app takes it from there.' });
     return tips;
   }
   const today = U.todayISO();
@@ -4353,7 +4353,7 @@ function coachTips(profile) {
   const tips = [];
   const q = profile.quiz, logs = profile.logs || [];
   if (!logs.length) {
-    tips.push({ kind: 'start', icon: 'bolt', title: 'Ready for lift-off', text: 'Your plan is ready. First session: pick weights that feel like you could do 2 more reps at the end of each set — the app takes over from there.' });
+    tips.push({ kind: 'start', icon: 'bolt', title: 'Ready for lift-off', text: 'First session: pick weights you could do 2 more reps with. The app takes it from there.' });
     return tips;
   }
   const today = U.todayISO();
@@ -5698,7 +5698,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.29.1';
+const APP_VERSION = '3.30.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -8262,7 +8262,6 @@ function foresightCardHtml(prof) {
   const worst = sim.notes.filter(n => n.k !== 'cap').slice(0, 1)[0] || sim.notes[0];
   return `<div class="card fs-card"><div class="row"><h3>Where this plan goes</h3><span class="spacer"></span>
       <span class="tag">${sim.weeks} weeks</span></div>
-    <p class="muted mt8" style="font-size:12px;line-height:1.5">Run through the same engine that writes ${isCoach ? 'their' : 'your'} sessions, at the rate ${isCoach ? who + ' has' : 'you have'} actually been training.</p>
     <div class="mt12">${top.map(l => `<div class="fs-lift">
       <span class="fs-nm">${U.esc(l.name)}</span>
       <span class="fs-arc">${U.fmtW(l.first, u)} → <b>${U.fmtW(l.last, u)}${U.unitLabel(u)}</b></span>
@@ -8313,8 +8312,8 @@ function showForesightSheet(prof) {
       <div><span class="lb">A rough month</span><b>${U.fmtW(rl.last, u)}${U.unitLabel(u)}</b></div>
     </div>
     <p class="muted mt8" style="font-size:11.5px;line-height:1.5">${typical.adherence.n
-      ? `"At the rate they train" uses ${who}${isCoach ? '’s' : 'r'} real record — ${Math.round(typical.adherence.hardRate * 100)}% of sets so far have come back rated hard.`
-      : 'No history yet, so the middle line assumes every session gets finished.'}</p>
+      ? `Middle line uses their real record — ${Math.round(typical.adherence.hardRate * 100)}% of sets rated hard so far.`
+      : 'No history yet — the middle line assumes every session gets finished.'}</p>
 
     ${typical.notes.length ? `<div class="cq-lb" style="margin-top:18px">What the engine will do about it</div>
       <div class="mt8">${typical.notes.slice(0, 5).map(n => `<div class="fs-note ${n.k}">${U.esc(fsNoteText(n, u))}</div>`).join('')}</div>`
@@ -8338,7 +8337,7 @@ function showForesightSheet(prof) {
           ? 'Every session of this lift has had a similar gap before it, so there’s nothing to compare. Move a day around and this fills in.'
           : `Needs a few more sessions of this lift before the gaps say anything (${rec.n || 0} so far).`}</div>`}</div>
 
-    <p class="muted mt12" style="font-size:11px;line-height:1.5">Projections run the real progression engine forward on a copy, against a ceiling that rises about ${(( { beginner: 1.3, intermediate: 0.65, advanced: 0.3 }[(src.quiz || {}).experience] ) || 0.65)}% a week for ${(src.quiz || {}).experience || 'intermediate'} training age — so sessions that get too far ahead of it come back missed, exactly as they would in the gym. No readiness check-ins and no deload weeks called by hand: it shows what the plan does, not what life does.</p>
+    <p class="muted mt12" style="font-size:11px;line-height:1.5">The real engine, run forward against a ceiling rising ~${(( { beginner: 1.3, intermediate: 0.65, advanced: 0.3 }[(src.quiz || {}).experience] ) || 0.65)}% a week. Shows what the plan does, not what life does.</p>
     <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
   const sel = document.getElementById('fs-pick');
   if (sel) sel.addEventListener('change', () => { App.fsLift = sel.value; showForesightSheet(prof); });
@@ -8358,7 +8357,7 @@ function standardsCardHtml(prof) {
 
   if (!bw) {
     return `<div class="card"><h3>Where ${isCoach ? who + ' stands' : 'you stand'}</h3>
-      <p class="muted mt8" style="line-height:1.55">Strength standards compare a lift to bodyweight, so ${isCoach ? `${who} needs` : 'you need'} one bodyweight logged before this can say anything useful. ${isCoach ? 'It’s in their Body card on Progress.' : 'Pop it in the Body card below — once only is enough to start.'}</p>
+      <p class="muted mt8" style="line-height:1.55">Needs a bodyweight to compare against. ${isCoach ? 'Theirs goes in the Body card on Progress.' : 'Add yours in the Body card below — once is enough.'}</p>
     </div>`;
   }
   if (!rows.length) {
@@ -8397,7 +8396,7 @@ function standardsCardHtml(prof) {
   return `<div class="card"><div class="row"><h3>Where ${isCoach ? who + ' stands' : 'you stand'}</h3><span class="spacer"></span>
       <span class="muted" style="font-size:11.5px">at ${U.fmtW(bw, u)}${U.unitLabel(u)}</span></div>
     <div class="mt12">${body}</div>
-    <p class="muted mt12" style="font-size:11px;line-height:1.5">Bands are population averages for ${(prof.quiz && prof.quiz.bodySex) === 'male' ? 'men' : 'women'} at this bodyweight — a sense of scale, not a verdict. Dates assume the last few weeks continue, which is exactly the thing training is meant to change.</p>
+    <p class="muted mt12" style="font-size:11px">Population averages — a sense of scale, not a verdict.</p>
   </div>`;
 }
 
@@ -8504,7 +8503,7 @@ function renderProgress(prof) {
     ${standardsCardHtml(prof)}
     <div class="card">
       <h3>Weekly sets per muscle</h3>
-      <div class="muted mt8" style="margin-bottom:6px">Last 7 days · green band = your target zone</div>
+      <div class="muted mt8" style="margin-bottom:6px">Last 7 days · green = target</div>
       ${Charts.bars(MUSCLE_GROUPS.map(g => ({ label: ({ shoulders: 'Delts', hamstrings: 'Hams' })[g] || GROUP_LABELS[g], value: sets7[g] })), { band })}
     </div>
     ${prList.length ? `<div class="card"><h3>Records</h3><div class="mt8">
@@ -9603,7 +9602,7 @@ function bodyCardHtml(prof) {
   const last = logs[logs.length - 1];
   const chart = logs.length >= 2
     ? Charts.line([{ label: 'Bodyweight', pts: logs.slice(-16).map(b => ({ x: U.fmtDateShort(b.date), y: prof.units === 'lb' ? Math.round(b.w * 2.20462 * 10) / 10 : b.w })) }], { h: 150 })
-    : `<p class="muted mt8">Optional — log it whenever you fancy. The trend is what matters; daily wiggles are just water and life.</p>`;
+    : `<p class="muted mt8">The trend is what matters, not the daily wiggle.</p>`;
   return `<div class="card"><div class="row"><h3>Body</h3><span class="spacer"></span>${last ? `<span class="muted">last: ${U.fmtW(last.w, prof.units)}${U.unitLabel(prof.units)} · ${U.fmtDateShort(last.date)}</span>` : ''}</div>
     ${chart}
     <div class="row mt12">
@@ -9670,7 +9669,7 @@ function shareCardHtml(prof) {
   const r = recapData(prof);
   return `<div class="card">
     <h3 style="color:var(--ink)">Share your week</h3>
-    <p class="mt8" style="font-size:13.5px;opacity:.95;line-height:1.5">${r.hasAny ? `Last week: ${r.lifts} ${U.plural(r.lifts, 'lift')}, ${r.sport} sport ${U.plural(r.sport, 'day')}, ${U.compact(r.vol)}kg${r.pbs.length ? `, ${r.pbs.length} PB${r.pbs.length > 1 ? 's' : ''}` : ''}. A clean summary worth sharing.` : 'Once you’ve logged a week, turn it into a shareable summary.'}</p>
+    <p class="mt8" style="font-size:13.5px;opacity:.95;line-height:1.5">${r.hasAny ? `Last week: ${r.lifts} ${U.plural(r.lifts, 'lift')}, ${r.sport} sport ${U.plural(r.sport, 'day')}, ${U.compact(r.vol)}kg${r.pbs.length ? `, ${r.pbs.length} PB${r.pbs.length > 1 ? 's' : ''}` : ''}. A clean summary worth sharing.` : 'Log a week and it becomes a shareable summary.'}</p>
     ${r.hasAny ? '<button class="btn onhero sm mt8" data-a="share-week">Create share image</button>' : ''}
   </div>`;
 }
@@ -10579,7 +10578,7 @@ function renderWeeksTab(prof) {
         </button>`).join('')}
       </div>`
       : `<div class="wk-sec">Completed weeks</div>
-         <div class="card"><p class="muted" style="font-size:13px;line-height:1.5">Nothing finished yet — completed weeks show up here, and you can open any session to see exactly what was lifted.</p></div>`}
+         <div class="card"><p class="muted" style="font-size:13px;line-height:1.5">Nothing finished yet. Completed weeks land here, and you can open any session.</p></div>`}
     <div style="height:70px"></div>`;
 }
 
@@ -10648,7 +10647,7 @@ function showWeekSheet(prof, wk) {
     ${prov ? `<div class="wk-prov t-${prov.tone}" style="margin-top:8px">${prov.label}</div>` : ''}
     ${when === 'past' && sum.vol ? `<div class="muted mt8" style="font-size:12.5px">${Math.round(sum.vol).toLocaleString()} ${U.unitLabel(src.units)} total volume · ${sum.mins} min${sum.prs ? ` · ${sum.prs} new best${sum.prs > 1 ? 's' : ''}` : ''}</div>` : ''}
     <div class="mt12">${rows.join('')}</div>
-    ${when !== 'past' ? `<div class="muted mt8" style="font-size:11.5px;line-height:1.45">Tap a day to preview it, ⇄ to move it to another day, ${IC('edit')} to edit the session, or ${IC('swap')} to change what that day is.</div>` : ''}
+    ${when !== 'past' ? `<div class="muted mt8" style="font-size:11.5px">⇄ move · ${IC('edit')} edit · ${IC('swap')} change the day</div>` : ''}
     <button class="btn ghost block mt12" data-a="sheet-close">Close</button>`);
 }
 
@@ -10912,7 +10911,7 @@ function renderCoachHome(prof) {
     <div class="card hero">
       <div class="kicker">THEIR PLAN</div>
       <h2 style="margin-top:4px">${U.esc(planState)}</h2>
-      <p style="margin-top:6px;opacity:.94;font-size:13.5px">Edit days in the Plan tab or build custom workouts — every save syncs to their phone. Add notes to any exercise or day while editing.</p>
+      <p style="margin-top:6px;opacity:.94;font-size:13.5px">Every save syncs to their phone.</p>
       <div class="row mt12">
         <button class="btn onhero sm" data-a="tab" data-id="plan">Edit their plan</button>
         <button class="btn sm" style="background:var(--fill);color:var(--ink)" data-a="co-showcode">Pair code</button>
@@ -10923,13 +10922,13 @@ function renderCoachHome(prof) {
       const who = U.esc((prof.coachOf || {}).athleteName || 'they');
       return `<div class="card">
       <div class="row"><h3>${s ? "This week's changes" : 'Life happened?'}</h3></div>
-      ${s || `<p class="tx">If ${who} can’t make a day, swap it with another one. It’s a one-off for that week unless you choose to make it stick.</p>`}
+      ${s || ''}
       <button class="btn sm ghost mt8" data-a="dm-adjust-open">⇄ Swap or move a day</button></div>`; })()}
     <div class="card">
       <div class="row"><h3>Notes</h3><span class="spacer"></span>
         ${(() => { const n = threadSorted(prof).filter(x => x.from === 'athlete' && !x.seen).length;
           return n ? `<span class="tag hot">${n} new</span>` : ''; })()}</div>
-      <p class="muted mt8" style="font-size:12.5px;line-height:1.5">Record a voice note — pin it to an exercise and they'll hear it at that lift, mid-session.</p>
+      <p class="muted mt8" style="font-size:12.5px;line-height:1.5">Pin one to an exercise and they’ll hear it at that lift.</p>
       ${(() => { const th = threadSorted(prof).slice(0, 2); return th.length ? `<div class="mt8">${th.map(n => vnBubbleHtml(prof, n)).join('')}</div>` : ''; })()}
       <div class="row mt8" style="gap:7px">
         <button class="btn dark sm" data-a="vn-open">${IC('chat')} Record a note</button>
@@ -10948,10 +10947,10 @@ function renderCoachHome(prof) {
       <button class="btn ghost sm mt8" data-a="co-showcode">Show pair code again</button></div>`}
     ${herPrs}
     ${pg && pg.plan && !co.loadedHerPlan ? `<div class="card"><h3>Start from their current plan?</h3>
-      <p class="muted mt8">Pull ${U.esc(pg.name)}’s existing week into your editor so you tweak rather than start from scratch.</p>
+      <p class="muted mt8">Tweak their current week instead of starting blank.</p>
       <button class="btn ghost sm mt8" data-a="co-load-herplan">Load their plan into editor</button></div>` : ''}
     <div class="card"><h3>Pairing</h3>
-      <p class="muted mt8">Linked to ${U.esc(co.athleteName)}’s phone. Ending it stops sync both ways (their plan and data stay on their phone).</p>
+      <p class="muted mt8">Ending this stops sync both ways. Nothing on either phone is deleted.</p>
       <button class="btn danger sm mt8" data-a="co-unpair">End coaching link</button>
     </div>
   </div>`;

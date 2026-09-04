@@ -744,6 +744,25 @@ body.wo-min .screen { padding-bottom: 58px; }
 .set-row .l { font-weight: 700; }
 .set-row .d { color: var(--ink2); font-size: 12.5px; margin-top: 1px; }
 
+/* weight-step pickers */
+.step-fam { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.step-fam:last-child { border: 0; }
+.step-fam-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.step-fam-h .l { font-weight: 800; font-size: 14.5px; }
+.step-fam-h .d { color: var(--ink2); font-size: 12.5px; margin-top: 1px; }
+.step-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+.step-opts button { flex: 1 1 auto; min-width: 62px; min-height: 40px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink2); border-radius: 11px; font-weight: 800; font-size: 13.5px; cursor: pointer; padding: 0 8px; }
+.step-opts button.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.dbask { display: block; width: 100%; text-align: left; margin-bottom: 12px; padding: 12px 14px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--fill); color: var(--ink2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.dbask b { color: var(--ink); font-weight: 800; white-space: nowrap; }
+/* swap sheet: ranked, with how close each one is */
+.sw-tier { color: var(--ink3); font-size: 11.5px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; margin: 16px 0 8px; }
+.ex-row .match { font-size: 10.5px; font-weight: 900; letter-spacing: .05em; padding: 4px 7px; border-radius: 7px;
+  background: var(--fill); color: var(--ink2); white-space: nowrap; }
+.ex-row .match.best { background: var(--good-bg, var(--fill)); color: var(--good-text, var(--ink)); }
+
 /* ---------- tab bar ---------- */
 .tabs {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
@@ -1549,6 +1568,7 @@ const U = {
   },
   unitLabel: units => units === 'lb' ? 'lb' : 'kg',
   toKg: (v, units) => units === 'lb' ? v / 2.20462 : v,
+  toLb: kg => kg * 2.20462,
   plural: (n, s, p) => n === 1 ? s : (p || s + 's'),
   fmtDur: sec => sec >= 60 ? Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0') : sec + 's',
   compact: n => n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'K' : String(Math.round(n)),
@@ -3652,7 +3672,108 @@ function generatePlan(profile) {
 
 /* ---- progression ---- */
 const e1rm = (w, reps) => reps <= 0 ? 0 : Math.round(w * (1 + Math.min(reps, 12) / 30) * 10) / 10;
-const roundStepFor = ex => ex.inc <= 1 ? 0.5 : ex.inc <= 2 ? 1 : 2.5;
+/* ---- weight steps -------------------------------------------------------
+   One press of + should move the weight by something you can actually load.
+   Real kit doesn't do 1.25kg: a cable stack moves a whole plate, a leg press
+   moves a pair, dumbbells jump rack to rack. Each family gets a round default;
+   you can change a whole family or one exercise, and if your logged loads keep
+   landing on a coarser grid (a 7kg stack, say) the app quietly matches it. */
+const STEP_FAMILIES = {
+  barbell:    { label: 'Barbell',     hint: 'a pair of the smallest plates', kg: 2.5, lb: 5,  optsKg: [0.5, 1, 1.25, 2.5, 5],  optsLb: [1, 2.5, 5, 10] },
+  dumbbell:   { label: 'Dumbbells',   hint: 'the gap between racked pairs',  kg: 2.5, lb: 5,  optsKg: [0.5, 1, 2, 2.5, 5],     optsLb: [1, 2.5, 5, 10] },
+  cable:      { label: 'Cables',      hint: 'one plate on the stack',        kg: 5,   lb: 10, optsKg: [2.5, 5, 6, 7, 10],      optsLb: [5, 10, 15, 20] },
+  machine:    { label: 'Machines',    hint: 'one notch down the pin',        kg: 5,   lb: 10, optsKg: [2.5, 5, 6, 7, 10],      optsLb: [5, 10, 15, 20] },
+  plate:      { label: 'Sled machines', hint: 'a pair of plates on the sled', kg: 5,  lb: 10, optsKg: [2.5, 5, 10, 20, 40],    optsLb: [5, 10, 25, 45] },
+  kettlebell: { label: 'Kettlebells', hint: 'the gap between bells',         kg: 4,   lb: 10, optsKg: [2, 4, 8],               optsLb: [5, 10, 15] },
+  other:      { label: 'Anything else', hint: 'belts, bands, odd objects',   kg: 2.5, lb: 5,  optsKg: [0.5, 1, 2.5, 5],        optsLb: [1, 2.5, 5, 10] },
+};
+const STEP_FAM_ORDER = ['barbell', 'dumbbell', 'cable', 'machine', 'plate', 'kettlebell', 'other'];
+/* leg press, hack squat and the machine hip thrust take plates, not a pin */
+const PLATE_LOADED = new Set(['leg_press', 'hack_squat', 'machine_hipthrust']);
+function stepFamily(ex) {
+  if (!ex) return 'other';
+  if (PLATE_LOADED.has(ex.id)) return 'plate';
+  const eq = ex.equip || [];
+  if (eq.includes('kettlebell')) return 'kettlebell';
+  if (eq.includes('barbell')) return 'barbell';
+  if (eq.includes('dumbbell')) return 'dumbbell';
+  if (eq.includes('cable')) return 'cable';
+  if (eq.includes('machine')) return 'machine';
+  return 'other';
+}
+function stepStore(prof) {
+  if (!prof.steps || typeof prof.steps !== 'object') prof.steps = {};
+  prof.steps.fam = prof.steps.fam || {};
+  prof.steps.ex = prof.steps.ex || {};
+  prof.steps.learn = prof.steps.learn || {};
+  return prof.steps;
+}
+function famStepKg(prof, fam) {
+  const F = STEP_FAMILIES[fam] || STEP_FAMILIES.other;
+  const s = stepStore(prof);
+  if (s.fam[fam] != null && +s.fam[fam] > 0) return +s.fam[fam];
+  return (prof.units === 'lb') ? U.toKg(F.lb, 'lb') : F.kg;
+}
+/* what one press of +/- moves, in kg. Pinned exercise wins, then a family the
+   athlete has set, then anything we've learned from her loads, then the default. */
+function stepForEx(prof, ex) {
+  if (!ex || !prof) return 2.5;
+  const s = stepStore(prof);
+  if (s.ex[ex.id] != null && +s.ex[ex.id] > 0) return +s.ex[ex.id];
+  const fam = stepFamily(ex);
+  if (s.fam[fam] == null && s.learn[ex.id] != null && +s.learn[ex.id] > 0) return +s.learn[ex.id];
+  return famStepKg(prof, fam);
+}
+function stepSourceFor(prof, ex) {
+  const s = stepStore(prof);
+  if (!ex) return 'default';
+  if (s.ex[ex.id] != null) return 'pinned';
+  if (s.fam[stepFamily(ex)] != null) return 'family';
+  if (s.learn[ex.id] != null) return 'learned';
+  return 'default';
+}
+/* + lands on the grid rather than merely adding to it: 32.5 with a 5kg stack
+   goes to 35, not 37.5. This is what makes the numbers come out round. */
+function snapStep(w, step, dir) {
+  if (!(step > 0)) return Math.max(0, w);
+  const eps = 1e-6, n = (w || 0) / step;
+  const t = dir > 0 ? Math.floor(n + eps) + 1 : Math.ceil(n - eps) - 1;
+  return Math.max(0, Math.round(t * step * 100) / 100);
+}
+const _gcdInt = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) { [a, b] = [b, a % b]; } return a; };
+/* If every load she has ever put on this move is a multiple of something
+   coarser than our default, that IS her kit — match it. Only ever coarsens,
+   never overrides a choice she has made herself. */
+function relearnStep(prof, exId) {
+  const ex = EX_BY_ID[exId];
+  if (!ex || ex.bw || ex.timed) return;
+  const s = stepStore(prof);
+  if (s.ex[exId] != null) return;
+  const seen = new Set();
+  for (const log of prof.logs || []) for (const e of (log.entries || [])) {
+    if (e.exId !== exId) continue;
+    for (const st of (e.sets || [])) if (st.done && st.w > 0) seen.add(Math.round(st.w * 100));
+  }
+  if (seen.size < 5) { delete s.learn[exId]; return; }
+  let g = 0; for (const v of seen) g = _gcdInt(g, v);
+  const kg = g / 100;
+  const base = famStepKg(prof, stepFamily(ex));
+  const round = Math.abs(kg * 4 - Math.round(kg * 4)) < 1e-6;
+  if (kg > base + 1e-6 && kg <= 10 && round) s.learn[exId] = kg;
+  else delete s.learn[exId];
+}
+const roundStepFor = (ex, prof) => prof ? stepForEx(prof, ex)
+  : (ex && ex.inc <= 1 ? 0.5 : ex && ex.inc <= 2 ? 1 : 2.5);
+
+/* ---- dumbbells: one, or both? --------------------------------------------
+   Logging a pair is ambiguous — 12.5 could be one bell or the pair. LiftOff
+   always means ONE dumbbell, and says so on the stepper. Volume doubles it. */
+const DB_PAIR = new Set(['curl_db', 'hammer_curl', 'lat_raise', 'reardelt_fly', 'upright_row_db',
+  'lunge_db', 'ohp_db', 'walking_lunge_db', 'rdl_db', 'shrug_db', 'db_fly', 'bench_db',
+  'bulg_split', 'incline_db', 'stepup_db']);
+const isDbPair = ex => !!ex && DB_PAIR.has(ex.id);
+/* the unit tag under a weight: KG, or KG EACH when there are two dumbbells */
+const wUnitTag = (ex, units) => U.unitLabel(units).toUpperCase() + (isDbPair(ex) ? ' EACH' : '');
 
 function exState(profile, exId) {
   profile.exState = profile.exState || {};
@@ -3687,7 +3808,7 @@ function startWeightEst(profile, ex) {
   else if (eq.includes('dumbbell') || eq.includes('kettlebell')) base = iso ? 6 : 12;
   else base = 8;
   if (iso && eq.includes('barbell')) base *= 0.6;
-  const step = roundStepFor(ex);
+  const step = roundStepFor(ex, profile);
   return Math.max(step, Math.round(base * lvlF * sexF / step) * step);
 }
 /* numeric weight behind a plan exercise. A pinned weight (coach/athlete set)
@@ -3758,7 +3879,7 @@ function applyProgression(profile, log) {
     if (anyMiss) {
       st.fails++; st.ups = 0;
       if (st.fails >= 2) {
-        const newW = Math.max(0, U.round(st.w * 0.9, roundStepFor(ex)));
+        const newW = Math.max(0, U.round(st.w * 0.9, roundStepFor(ex, profile)));
         msgs.push({ exId: ex.id, kind: 'deload', text: `${ex.name}: two tough sessions — dropping to ${newW}kg to rebuild momentum. You’ll be past ${st.w}kg again in no time.` });
         st.why = { k: 'deload', from: st.w, to: newW };
         st.w = newW; st.fails = 0; st.repTarget = planEx.repsMin;
@@ -3945,14 +4066,71 @@ function weeklySets(profile, fromISO, toISO) {
   return out;
 }
 
-function alternativesFor(profile, exId) {
+/* ---- swapping an exercise -------------------------------------------------
+   "Shares any one muscle" is far too loose — it offered Goblet Squat as a
+   deadlift alternative and Lateral Raise for overhead press. We score how much
+   of the same job a move does, so the list is ranked and the tail is cut. */
+
+/* movements that genuinely stand in for one another */
+const PATTERN_KIN = {
+  squat: ['lunge', 'quadiso'], lunge: ['squat', 'quadiso'], quadiso: ['squat', 'lunge'],
+  hinge: ['hthrust', 'hamiso', 'lowback'], hthrust: ['hinge', 'gluteiso'],
+  gluteiso: ['hthrust', 'hinge'], hamiso: ['hinge'],
+  pushH: ['chestiso'], chestiso: ['pushH'], pushV: ['deltside'], deltside: ['pushV', 'reardelt'],
+  pullH: ['pullV', 'upperback'], pullV: ['pullH'], upperback: ['pullH', 'reardelt'],
+  reardelt: ['upperback', 'deltside'], bi: [], tri: [], calf: [], carry: ['lowback'], lowback: ['hinge'],
+  coreanti: ['coreflex', 'corerot'], coreflex: ['coreanti', 'corerot'], corerot: ['coreanti', 'coreflex'],
+};
+const EQUIP_KIN = { barbell: ['dumbbell'], dumbbell: ['barbell', 'kettlebell'], cable: ['machine'],
+  machine: ['cable', 'plate'], plate: ['machine'], kettlebell: ['dumbbell'], other: [] };
+
+/* a move as a weighted bag of muscles: primaries count full, secondaries a third */
+function exMuscleVec(ex) {
+  const v = {};
+  for (const m of (ex.m.p || [])) v[m] = (v[m] || 0) + 1;
+  for (const m of (ex.m.s || [])) v[m] = (v[m] || 0) + 0.35;
+  return v;
+}
+function vecCos(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (const k in a) { na += a[k] * a[k]; if (b[k]) dot += a[k] * b[k]; }
+  for (const k in b) nb += b[k] * b[k];
+  return (na && nb) ? dot / Math.sqrt(na * nb) : 0;
+}
+/* 0–1: how well `e` does the job `cur` was doing */
+function swapScore(cur, e) {
+  let s = 0.62 * vecCos(exMuscleVec(cur), exMuscleVec(e));
+  if (e.pattern === cur.pattern) s += 0.20;
+  else if ((PATTERN_KIN[cur.pattern] || []).includes(e.pattern)) s += 0.10;
+  s += (e.cat === cur.cat) ? 0.10 : -0.06;               // don't trade an accessory for a big lift
+  const fa = stepFamily(cur), fb = stepFamily(e);
+  if (fa === fb) s += 0.05;
+  else if ((EQUIP_KIN[fa] || []).includes(fb)) s += 0.025;
+  if (!!e.unilateral === !!cur.unilateral) s += 0.03;
+  if (!!e.bw !== !!cur.bw) s -= 0.04;
+  s -= Math.abs((e.lvl || 1) - (cur.lvl || 1)) * 0.03;
+  return Math.max(0, Math.min(1, s));
+}
+const SWAP_FLOOR = 0.30;   // below this it isn't an alternative, it's a different exercise
+const SWAP_CLOSE = 0.55;   // at or above this it's doing the same job
+/* opts.exclude: ids already in the session — never offer her the same move twice */
+function alternativesFor(profile, exId, opts) {
   const cur = EX_BY_ID[exId]; if (!cur) return [];
   const q = profile.quiz;
   const maxLvl = EXPERIENCE[q.experience].maxLvl;
-  return EXERCISES.filter(e => e.id !== exId && e.lvl <= maxLvl && (profile.exPrefs || {})[e.id] !== 'ban' &&
-    e.equip.every(eq => q.equipment.includes(eq)) &&
-    (e.pattern === cur.pattern || e.m.p.some(m => cur.m.p.includes(m))))
-    .sort((a, b) => (b.pattern === cur.pattern ? 1 : 0) - (a.pattern === cur.pattern ? 1 : 0));
+  const skip = (opts && opts.exclude) || new Set();
+  const out = [];
+  for (const e of EXERCISES) {
+    if (e.id === exId || skip.has(e.id)) continue;
+    if (e.lvl > maxLvl || (profile.exPrefs || {})[e.id] === 'ban') continue;
+    if (!e.equip.every(eq => q.equipment.includes(eq))) continue;
+    if (e.timed !== cur.timed && (!e.bw || !cur.bw)) continue;   // a loaded hold is not a swap for a lift
+    if (!e.m.p.some(m => cur.m.p.includes(m))) continue; // must actually train the same thing
+    const sc = swapScore(cur, e);
+    if (sc < SWAP_FLOOR) continue;
+    out.push(Object.assign({}, e, { _swap: sc }));
+  }
+  return out.sort((a, b) => b._swap - a._swap || a.name.localeCompare(b.name)).slice(0, (opts && opts.limit) || 8);
 }
 
 /* ---- coach insights ---- */
@@ -4513,6 +4691,13 @@ function migrateProfile(p) {
   if (!p.badges) p.badges = {};
   if (!p.bodyLogs) p.bodyLogs = [];
   if (!p.barKg) p.barKg = 20;
+  // v3.35 — round weight steps. On the first load, read her real loading grid
+  // straight out of the history she already has, so + behaves from set one.
+  if (!p.steps) {
+    stepStore(p);
+    try { for (const id of new Set((p.logs || []).flatMap(l => (l.entries || []).map(e => e.exId)))) relearnStep(p, id); }
+    catch (e) { /* history in an odd shape — defaults are fine */ }
+  }
   if (p.plan && !p.plan.dayMap) p.plan.dayMap = assignDayMap(p.plan, p.quiz.weekSchedule);
   if (p.plan && !p.plan.createdAt) p.plan.createdAt = p.createdAt || U.todayISO();
   if (!p.plan && p.quiz.goal) { try { p.plan = generatePlan(p); } catch (e) { /* keep going — Today view guards */ } }
@@ -4801,7 +4986,7 @@ function applyDeload(prof, planEx, target) { // adjust prefilled targets during 
   const ex = EX_BY_ID[planEx.exId];
   const t = Object.assign({}, target);
   t.sets = Math.max(2, (planEx.sets || 3) - 1);
-  if (t.w != null && ex && !ex.bw && !ex.timed) t.w = Math.max(0, U.round(t.w * 0.9, roundStepFor(ex)));
+  if (t.w != null && ex && !ex.bw && !ex.timed) t.w = Math.max(0, U.round(t.w * 0.9, roundStepFor(ex, prof)));
   t.deload = true;
   return t;
 }
@@ -5888,7 +6073,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.34.0';
+const APP_VERSION = '3.35.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6131,7 +6316,7 @@ function buildEntries(prof, exercises) {
     if (easy) t = applyDeload(prof, pe, Object.assign({ sets: pe.sets }, t));
     const ex0 = EX_BY_ID[pe.exId];
     if (rm && rm.mod !== 1 && t.w && ex0 && !ex0.bw && !ex0.timed) {  // readiness eases/bumps today's loads
-      t = Object.assign({}, t, { w: Math.max(0, U.round(t.w * rm.mod, roundStepFor(ex0))) });
+      t = Object.assign({}, t, { w: Math.max(0, U.round(t.w * rm.mod, roundStepFor(ex0, prof))) });
     }
     const nSets = easy && t.sets ? t.sets : pe.sets;
     const sets = [];
@@ -6191,6 +6376,7 @@ function finishWorkout(prof) {
   const easy = deloadActive(prof, log.date);
   const msgs = easy ? [{ kind: 'hold', text: 'Easy week done — everything picks up where it left off next week.' }] : applyProgression(prof, log);
   prof.logs.push(log);
+  for (const e of log.entries) relearnStep(prof, e.exId);   // her real loading grid, learned
   const badges = newBadges(prof);
   if (w.dayIdx != null && prof.plan) prof.plan.nextDayIdx = ((w.dayIdx + 1) % prof.plan.days.length);
   prof.activeWorkout = null;
@@ -7028,6 +7214,7 @@ function renderToday(prof) {
       ${weeks >= 2 ? `<span class="streak-chip">${weeks}-week streak</span>` : ''}
     </div>
     ${coachPlanCardHtml(prof)}
+    ${needsDbAsk(prof) ? `<button class="dbask" data-a="dbconv-open">Quick one: your old dumbbell logs — one bell or both? <b>Sort it ›</b></button>` : ''}
     ${hero}
     ${coachMsgCardHtml(prof)}
     ${!aw ? `<button class="btn primary block qs-cta" data-a="quick-start">${IC('play')} Start a workout</button>` : ''}
@@ -7144,7 +7331,7 @@ function renderWorkoutEx(prof, e, ei) {
   const warmupRows = (e.warmup || []).map((ws, wi) => `
       <div class="setrow warmrow">
         <div class="sn">W</div>
-        <div class="step warmcell"><div class="v"><span>${U.fmtW(ws.w, u)}</span><small>${U.unitLabel(u).toUpperCase()}</small></div></div>
+        <div class="step warmcell"><div class="v"><span>${U.fmtW(ws.w, u)}</span><small>${wUnitTag(ex, u)}</small></div></div>
         <div class="step warmcell"><div class="v"><span>${ws.reps}</span><small>REPS</small></div></div>
         <button class="donebtn ${ws.done ? 'on' : ''}" data-a="wo-warm-done" data-ei="${ei}" data-wi="${wi}">✓</button>
       </div>`).join('');
@@ -7164,7 +7351,7 @@ function renderWorkoutEx(prof, e, ei) {
           ex.timed ? `<button class="step holdgo" data-a="wo-hold" data-ei="${ei}" data-si="${si}"><span id="hold-${ei}-${si}">▶ ${s.reps}s hold</span></button>` :
           `<div class="step">
             <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="w" data-d="-1">−</button>
-            <div class="v tappable" data-a="wo-typein" data-ei="${ei}" data-si="${si}" data-f="w" title="Tap to type"><span>${s.w > 0 ? U.fmtW(s.w, u) : '—'}</span><small>${U.unitLabel(u).toUpperCase()}</small></div>
+            <div class="v tappable" data-a="wo-typein" data-ei="${ei}" data-si="${si}" data-f="w" title="Tap to type"><span>${s.w > 0 ? U.fmtW(s.w, u) : '—'}</span><small>${wUnitTag(ex, u)}</small></div>
             <button data-a="wo-step" data-ei="${ei}" data-si="${si}" data-f="w" data-d="1">+</button>
           </div>`}
         <div class="step">
@@ -7307,12 +7494,6 @@ function afterWorkoutRender(prof) {
   // rest bar lives at body level and survives re-renders
 }
 
-/* stepper resolution */
-function stepSize(ex, units) {
-  if (units === 'lb') return U.toKg(2.5, 'lb');
-  return ex.inc >= 5 ? 2.5 : ex.inc >= 2 ? 1.25 : 0.5;
-}
-
 function workoutAction(a, el, prof) {
   const w = App.workout;
   if (a === 'start-workout') { Sound.unlock(); WakeLock.on(); startWorkout(prof, +el.dataset.idx); render(); return; }
@@ -7360,11 +7541,11 @@ function workoutAction(a, el, prof) {
   if (a === 'wo-step') {
     const e = w.entries[+el.dataset.ei], s = e.sets[+el.dataset.si];
     const ex = EX_BY_ID[e.exId];
-    if (el.dataset.f === 'w') s.w = Math.max(0, Math.round((s.w + stepSize(ex, prof.units) * (+el.dataset.d)) * 100) / 100);
+    if (el.dataset.f === 'w') s.w = snapStep(s.w, stepForEx(prof, ex), +el.dataset.d);
     else s.reps = U.clamp(s.reps + (+el.dataset.d) * (ex.timed ? 5 : 1), 0, ex.timed ? 300 : 50);
     prof.activeWorkout = w; saveApp();
     const v = el.parentElement.querySelector('.v');
-    if (el.dataset.f === 'w') v.innerHTML = `<span>${s.w > 0 ? U.fmtW(s.w, prof.units) : '—'}</span><small>${U.unitLabel(prof.units).toUpperCase()}</small>`;
+    if (el.dataset.f === 'w') v.innerHTML = `<span>${s.w > 0 ? U.fmtW(s.w, prof.units) : '—'}</span><small>${wUnitTag(ex, prof.units)}</small>`;
     else v.innerHTML = `<span>${s.reps}</span><small>${ex.timed ? 'SEC' : 'REPS'}</small>`;
     return;
   }
@@ -7374,7 +7555,7 @@ function workoutAction(a, el, prof) {
     const e = w.entries[ei], s = e.sets[si];
     const ex = EX_BY_ID[e.exId];
     const cur = isW ? (s.w > 0 ? U.fmtW(s.w, prof.units) : '') : String(s.reps);
-    const unitTag = isW ? U.unitLabel(prof.units).toUpperCase() : (ex.timed ? 'SEC' : 'REPS');
+    const unitTag = isW ? wUnitTag(ex, prof.units) : (ex.timed ? 'SEC' : 'REPS');
     el.innerHTML = `<input class="step-input" type="text" inputmode="decimal" enterkeyhint="done" value="${cur}"><small>${unitTag}</small>`;
     const inp = el.querySelector('input');
     inp.focus(); inp.select();
@@ -7469,7 +7650,7 @@ function workoutAction(a, el, prof) {
   }
   if (a === 'wo-feel') { w.entries[+el.dataset.ei].feel = el.dataset.v; prof.activeWorkout = w; saveApp(); render(); return; }
   if (a === 'wo-how') { App._vidChoice = null; showExerciseSheet(el.dataset.ex, prof); return; }
-  if (a === 'wo-swap') { showSwapSheet(+el.dataset.ei, prof); return; }
+  if (a === 'wo-swap') { sheetRoot('Swap', showSwapSheet, +el.dataset.ei, prof); return; }
   if (a === 'wo-add-ex') { showAddExSheet(prof); return; }
   if (a === 'rest-add') {
     const r = App.restTimer;
@@ -7715,12 +7896,125 @@ function patternEmoji(ex) {
     bi: '', tri: '', calf: '', carry: '', lowback: '' };
   return map[ex.pattern] || '';
 }
+/* ---- weight-step controls ------------------------------------------------ */
+function fmtStep(kg, units) {
+  const v = units === 'lb' ? U.toLb(kg) : kg;
+  return (Math.round(v * 100) / 100).toString().replace(/\.0+$/, '') + (units === 'lb' ? ' lb' : ' kg');
+}
+function stepOptsFor(prof, fam) {
+  const F = STEP_FAMILIES[fam] || STEP_FAMILIES.other;
+  return (prof.units === 'lb' ? F.optsLb.map(v => U.toKg(v, 'lb')) : F.optsKg.slice());
+}
+function stepSegHtml(prof, fam, action, extra) {
+  const opts = stepOptsFor(prof, fam);
+  const cur = famStepKg(prof, fam);
+  return `<div class="step-opts">${opts.map(v =>
+    `<button class="${Math.abs(v - cur) < 0.005 ? 'on' : ''}" data-a="${action}" data-fam="${fam}" data-v="${v}" ${extra || ''}>${fmtStep(v, prof.units)}</button>`).join('')}</div>`;
+}
+/* Profile → how much one press of + moves, per kind of kit */
+function showStepsSheet(prof) {
+  const body = STEP_FAM_ORDER.map(fam => {
+    const F = STEP_FAMILIES[fam];
+    const set = stepStore(prof).fam[fam] != null;
+    return `<div class="step-fam">
+      <div class="step-fam-h"><div><div class="l">${F.label}</div><div class="d">${F.hint}</div></div>
+        ${set ? `<button class="btn sm ghost" data-a="step-fam-reset" data-fam="${fam}">Reset</button>` : ''}</div>
+      ${stepSegHtml(prof, fam, 'step-fam-set')}
+    </div>`;
+  }).join('');
+  const learned = Object.entries(stepStore(prof).learn).filter(([id]) => EX_BY_ID[id]);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Weight steps</h3>
+    <p class="muted mt8" style="margin-bottom:12px">How much one press of + or − moves. Set it to whatever your gym actually has.</p>
+    ${body}
+    ${learned.length ? `<div class="kicker" style="margin:16px 0 8px">Matched to your loads</div>
+      ${learned.map(([id, v]) => `<div class="set-row"><div><div class="l">${U.esc(EX_BY_ID[id].name)}</div><div class="d">every load you've logged is a multiple of this</div></div><span style="font-weight:800">${fmtStep(+v, prof.units)}</span></div>`).join('')}` : ''}`);
+}
+/* the same control for a single exercise, reachable from the swap sheet */
+function showExStepSheet(prof, exId) {
+  const ex = EX_BY_ID[exId]; if (!ex) return;
+  sheetGo(`${ex.name} steps`, exStepBody, prof, exId);
+}
+function exStepBody(prof, exId) {
+  const ex = EX_BY_ID[exId]; if (!ex) return;
+  const fam = stepFamily(ex);
+  const cur = stepForEx(prof, ex);
+  const src = stepSourceFor(prof, ex);
+  const opts = stepOptsFor(prof, fam);
+  const extra = opts.some(v => Math.abs(v - cur) < 0.005) ? [] : [cur];
+  const srcWord = src === 'pinned' ? 'set for this exercise' : src === 'family'
+    ? `from your ${STEP_FAMILIES[fam].label.toLowerCase()} setting` : src === 'learned'
+    ? 'matched to the loads you log here' : `the usual for ${STEP_FAMILIES[fam].label.toLowerCase()}`;
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Weight steps</h3>
+    <p class="muted mt8" style="margin-bottom:12px">${U.esc(ex.name)} moves in <b>${fmtStep(cur, prof.units)}</b> — ${srcWord}.</p>
+    <div class="step-opts">${opts.concat(extra).map(v =>
+      `<button class="${Math.abs(v - cur) < 0.005 ? 'on' : ''}" data-a="step-ex-set" data-ex="${exId}" data-v="${v}">${fmtStep(v, prof.units)}</button>`).join('')}</div>
+    ${src === 'pinned' ? `<button class="btn sm ghost block mt12" data-a="step-ex-reset" data-ex="${exId}">Use my ${STEP_FAMILIES[fam].label.toLowerCase()} setting</button>` : ''}`);
+}
+
+/* ---- one-time question: did your old dumbbell logs mean one bell or two? --- */
+function dbPairSetCount(prof) {
+  let n = 0;
+  for (const log of prof.logs || []) for (const e of (log.entries || []))
+    if (DB_PAIR.has(e.exId)) n += (e.sets || []).filter(x => x.done && x.w > 0).length;
+  return n;
+}
+const needsDbAsk = prof => !prof.isCoach && !prof.dbConv && dbPairSetCount(prof) >= 3;
+function showDbConvSheet(prof) {
+  const n = dbPairSetCount(prof);
+  showSheet(`<h3 style="font-size:19px;font-weight:900">Dumbbell weights</h3>
+    <p class="muted mt8" style="margin-bottom:14px">From now on LiftOff always means <b>one dumbbell</b> — the stepper says <b>EACH</b>. Your ${n} older dumbbell sets: which did you type?</p>
+    <button class="ex-row" data-a="dbconv" data-v="each"><span class="thumb">1</span>
+      <span style="flex:1;min-width:0"><span class="nm">One dumbbell</span><div class="mu">Nothing changes</div></span><span class="go">›</span></button>
+    <button class="ex-row" data-a="dbconv" data-v="both"><span class="thumb">2</span>
+      <span style="flex:1;min-width:0"><span class="nm">Both added together</span><div class="mu">Halve them so everything lines up</div></span><span class="go">›</span></button>
+    <button class="ex-row" data-a="dbconv" data-v="skip"><span class="thumb">?</span>
+      <span style="flex:1;min-width:0"><span class="nm">Can't remember</span><div class="mu">Leave the old ones alone</div></span><span class="go">›</span></button>`);
+}
+/* halve (f=0.5) or restore (f=2) every dumbbell-pair weight already recorded */
+function scaleDbPairHistory(prof, f) {
+  const sc = w => (w > 0 ? Math.round(w * f * 100) / 100 : w);
+  for (const log of prof.logs || []) for (const e of (log.entries || [])) {
+    if (!DB_PAIR.has(e.exId)) continue;
+    for (const st of (e.sets || [])) st.w = sc(st.w);
+    for (const st of (e.warmup || [])) st.w = sc(st.w);
+  }
+  for (const id of DB_PAIR) {
+    const st = (prof.exState || {})[id];
+    if (st) { st.w = sc(st.w); for (const h of (st.history || [])) { h.topW = sc(h.topW); h.e1rm = sc(h.e1rm); h.vol = sc(h.vol); } }
+    const pr = (prof.prs || {})[id];
+    if (pr) { pr.w = sc(pr.w); if (pr.e1rm) pr.e1rm = sc(pr.e1rm); }
+  }
+  for (const d of ((prof.plan || {}).days || [])) for (const pe of (d.exercises || []))
+    if (DB_PAIR.has(pe.exId)) { if (pe.w != null) pe.w = sc(pe.w); if (pe.cap != null) pe.cap = sc(pe.cap); }
+  for (const c of (prof.customWorkouts || [])) for (const pe of (c.exercises || []))
+    if (DB_PAIR.has(pe.exId)) { if (pe.w != null) pe.w = sc(pe.w); if (pe.cap != null) pe.cap = sc(pe.cap); }
+}
+
+function swapRowHtml(ex, action, extra, rank) {
+  const tag = rank === 0 ? '<span class="match best">BEST</span>'
+    : ex._swap >= SWAP_CLOSE ? '<span class="match">CLOSE</span>' : '';
+  return `<button class="ex-row" data-a="${action}" data-ex="${ex.id}" ${extra || ''}>
+    <span class="thumb">${exArtThumb(ex.id)}</span>
+    <span style="flex:1;min-width:0"><span class="nm">${U.esc(ex.name)}</span>
+    <div class="mu">${ex.m.p.map(m => MUSCLES[m].label).join(', ')}</div></span>
+    ${tag}
+  </button>`;
+}
 function showSwapSheet(ei, prof) {
   const cur = EX_BY_ID[App.workout.entries[ei].exId];
-  const alts = alternativesFor(prof, cur.id).slice(0, 8);
+  const inW = new Set(App.workout.entries.map(e => e.exId));   // never suggest what she's already doing
+  const alts = alternativesFor(prof, cur.id, { exclude: inW });
+  const same = alts.filter(a => a._swap >= SWAP_CLOSE);
+  const near = alts.filter(a => a._swap < SWAP_CLOSE);
   showSheet(`<h3 style="font-size:19px;font-weight:900">Swap ${U.esc(cur.name)}</h3>
-    <p class="muted mt8" style="margin-bottom:12px">Similar moves that fit your kit — your plan updates too.</p>
-    ${alts.length ? alts.map(a => exRowHtml(a, 'do-swap', `data-ei="${ei}"`)).join('') : '<div class="empty">No good alternatives with your current equipment.</div>'}`);
+    <p class="muted mt8" style="margin-bottom:12px">Best match first. Your plan updates too.</p>
+    ${same.map((a, i) => swapRowHtml(a, 'do-swap', `data-ei="${ei}"`, i)).join('')}
+    ${near.length ? `<div class="sw-tier">${same.length ? 'Different emphasis' : 'Nothing does the same job — closest are'}</div>
+      ${near.map((a, i) => swapRowHtml(a, 'do-swap', `data-ei="${ei}"`, same.length ? -1 : i)).join('')}` : ''}
+    ${alts.length ? '' : `<div class="empty">${[...inW].some(id => id !== cur.id && EX_BY_ID[id] && EX_BY_ID[id].m.p.some(m => cur.m.p.includes(m)))
+      ? 'Nothing left — the similar moves are already in this workout.'
+      : 'Nothing in your kit trains this the same way.'}</div>`}
+    <button class="btn sm ghost block mt16" data-a="ex-steps-open" data-ex="${cur.id}">Weight steps for ${U.esc(cur.name)}</button>`);
 }
 function showAddExSheet(prof) {
   const inW = new Set(App.workout.entries.map(e => e.exId));
@@ -8803,6 +9097,12 @@ function renderProfileView(prof) {
       <div class="set-row"><div><div class="l">Barbell weight</div><div class="d">Used for the plate maths in workouts</div></div>
         <div class="seg" style="margin:0;width:170px">${[10, 15, 20].map(v => `<button class="${(prof.barKg || 20) === v ? 'on' : ''}" data-a="set-barkg" data-v="${v}">${v}kg</button>`).join('')}</div>
       </div>
+      <div class="set-row"><div><div class="l">Weight steps</div><div class="d">What one press of + moves, per kind of kit</div></div>
+        <button class="btn sm ghost" data-a="steps-open">Set up</button>
+      </div>
+      ${DB_PAIR.size && dbPairSetCount(prof) ? `<div class="set-row"><div><div class="l">Dumbbell weights</div><div class="d">${prof.dbConv === 'both' ? 'Old logs halved to one dumbbell' : 'One dumbbell — the stepper says EACH'}</div></div>
+        <button class="btn sm ghost" data-a="dbconv-open">${prof.dbConv ? 'Change' : 'Check'}</button>
+      </div>` : ''}
     </div>
     ${accountCardHtml(prof)}
     <div class="card">
@@ -9071,7 +9371,10 @@ function dispatch(e) {
       const pe = day.exercises.find(x => x.exId === entry.exId);
       if (pe) pe.exId = newEx.id;
     }
-    const newPlanEx = Object.assign({}, entry.plan, { exId: newEx.id, timed: !!newEx.timed });
+    const oldEx = EX_BY_ID[entry.exId];
+    const newPlanEx = (oldEx && !!oldEx.timed !== !!newEx.timed)
+      ? Object.assign({}, entry.plan, cwDefaultEntry(prof, newEx))   // seconds ↔ reps: re-scheme it
+      : Object.assign({}, entry.plan, { exId: newEx.id, timed: !!newEx.timed });
     const t = nextTargets(prof, newPlanEx);
     entry.exId = newEx.id;
     entry.plan = newPlanEx;
@@ -9254,6 +9557,21 @@ function dispatch(e) {
     prof.quiz.bodySex = el.dataset.v === 'male' ? 'male' : 'female';
     if (prof.coachSync) { prof.coachSync.pendingProgress = true; setTimeout(() => syncTick(true), 800); } // coach's view of you follows
     saveApp(); render(); return;
+  }
+  if (a === 'steps-open') { sheetRoot('Weight steps', showStepsSheet, prof); return; }
+  if (a === 'step-fam-set') { stepStore(prof).fam[el.dataset.fam] = +el.dataset.v; saveApp(); showStepsSheet(prof); return; }
+  if (a === 'step-fam-reset') { delete stepStore(prof).fam[el.dataset.fam]; saveApp(); showStepsSheet(prof); return; }
+  if (a === 'step-ex-set') { stepStore(prof).ex[el.dataset.ex] = +el.dataset.v; saveApp(); exStepBody(prof, el.dataset.ex); render(); return; }
+  if (a === 'step-ex-reset') { delete stepStore(prof).ex[el.dataset.ex]; saveApp(); exStepBody(prof, el.dataset.ex); render(); return; }
+  if (a === 'ex-steps-open') { showExStepSheet(prof, el.dataset.ex); return; }
+  if (a === 'dbconv-open') { sheetRoot('Dumbbell weights', showDbConvSheet, prof); return; }
+  if (a === 'dbconv') {
+    const v = el.dataset.v;
+    if (v === 'both' && prof.dbConv !== 'both') { scaleDbPairHistory(prof, 0.5); prof.dbConv = 'both'; toast('Halved — those are one dumbbell now'); }
+    else if (v !== 'both' && prof.dbConv === 'both') { scaleDbPairHistory(prof, 2); prof.dbConv = v === 'skip' ? 'skip' : 'each'; toast('Put back as they were'); }
+    else { prof.dbConv = v === 'both' ? 'both' : v === 'skip' ? 'skip' : 'each'; toast('Got it'); }
+    for (const id of DB_PAIR) relearnStep(prof, id);
+    saveApp(); closeSheet(); render(); return;
   }
   if (a === 'set-barkg') { prof.barKg = +el.dataset.v; saveApp(); render(); toast(`Plate maths now assumes a ${prof.barKg}kg bar`); return; }
   if (a === 'notif-enable') {
@@ -9561,7 +9879,7 @@ function customAction(a, el, prof) {
     const ex = EX_BY_ID[pe.exId];
     const delta = +el.dataset.d, inc = (ex && ex.inc) || 2.5;
     const base = pe.w != null ? +pe.w : (resolvePlanWeight(prof, pe).w || 0);
-    pe.w = U.clamp(U.round(base + delta * inc, roundStepFor(ex)), 0, 999);
+    pe.w = U.clamp(U.round(base + delta * inc, roundStepFor(ex, prof)), 0, 999);
     showBuilderSheet(prof); return;
   }
   if (a === 'cw-wclear') { // back to Auto — progression drives the weight again
@@ -9580,7 +9898,7 @@ function customAction(a, el, prof) {
     const ex = EX_BY_ID[pe.exId];
     const inc = (ex && ex.inc) || 2.5, delta = +el.dataset.d;
     const base = pe.cap != null ? +pe.cap : (resolvePlanWeight(prof, pe).w || 0);
-    const next = U.round(base + delta * inc, roundStepFor(ex));
+    const next = U.round(base + delta * inc, roundStepFor(ex, prof));
     if (next <= 0) delete pe.cap; else pe.cap = U.clamp(next, 0, 999);
     showBuilderSheet(prof); return;
   }
@@ -9613,12 +9931,12 @@ function customAction(a, el, prof) {
       const raw = (inp.value || '').trim();
       if (f === 'cap') { // blank or "none" → no ceiling
         if (raw === '' || /none|auto/i.test(raw)) delete pe.cap;
-        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n > 0) pe.cap = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId])), 0, 999); }
+        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n > 0) pe.cap = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId], prof)), 0, 999); }
         showBuilderSheet(prof); return;
       }
       if (f === 'w') { // blank or "auto" → progression drives it; a number pins it
         if (raw === '' || /auto/i.test(raw)) delete pe.w;
-        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n >= 0) pe.w = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId])), 0, 999); }
+        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n >= 0) pe.w = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId], prof)), 0, 999); }
         showBuilderSheet(prof); return;
       }
       if (raw !== '') {
@@ -10331,7 +10649,7 @@ function setReplayHtml(prof) {
 
   const u = pg.units || 'kg';
   const maxReps = Math.max(...sess.flatMap(x => x.sets.map(s => s.reps)), 1);
-  const who = U.esc(co.athleteName || 'They');
+  // (athlete name no longer needed here — the read line speaks for itself)
   const last = sess[sess.length - 1];
   const fade = sessionFade(last);
   const worst = Math.max(...sess.map(sessionFade));
@@ -10343,8 +10661,7 @@ function setReplayHtml(prof) {
   return `<div class="card">
     <div class="row"><h3>Set by set</h3><span class="spacer"></span>
       ${fade >= 0.34 ? '<span class="tag hot">fading</span>' : '<span class="tag ok">holding</span>'}</div>
-    <p class="muted mt8" style="font-size:12.5px;line-height:1.5">${U.esc(read)}
-      Every other view shows ${who} one number a session; this is the whole session.</p>
+    <p class="muted mt8" style="font-size:12.5px;line-height:1.5">${U.esc(read)}</p>
     ${lifts.length > 1 ? `<select class="search mt8" id="sr-lift" style="margin-bottom:8px;padding:10px 12px">
       ${lifts.map(l => `<option value="${U.esc(l.id)}" ${l.id === pick.id ? 'selected' : ''}>${U.esc((EX_BY_ID[l.id] || {}).name || l.id)}</option>`).join('')}
     </select>` : `<div class="kicker mt8">${U.esc((EX_BY_ID[pick.id] || {}).name || pick.id)}</div>`}

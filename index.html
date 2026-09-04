@@ -745,6 +745,50 @@ body.wo-min .screen { padding-bottom: 58px; }
 .set-row .d { color: var(--ink2); font-size: 12.5px; margin-top: 1px; }
 
 /* weight-step pickers */
+/* the month report */
+.mr-nav { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; }
+.mr-arrow { width: 40px; height: 40px; flex: none; border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); border-radius: 12px; font-size: 20px; font-weight: 800; line-height: 1; cursor: pointer; }
+.mr-arrow[disabled] { opacity: .3; cursor: default; }
+.mr-title { flex: 1; text-align: center; min-width: 0; }
+.mr-title b { display: block; font-family: var(--font-display); font-size: 19px; font-weight: 900; letter-spacing: -.01em; }
+.mr-title span { display: block; font-size: 11.5px; color: var(--ink2); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.mr-tiles { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 7px; }
+.mr-t { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 6px; text-align: center; }
+.mr-t .v { font-family: var(--font-d); font-weight: 900; font-size: 22px; line-height: 1.05; letter-spacing: -.02em; }
+.mr-t .v small { font-size: 11px; font-weight: 800; opacity: .6; }
+.mr-t .lb { font-size: 10px; color: var(--ink2); font-weight: 700; margin-top: 3px; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-t .v { white-space: nowrap; }
+.mr-sec { margin-top: 20px; }
+.mr-sec .kicker { margin-bottom: 9px; }
+.mr-lift { padding: 9px 0; border-bottom: 1px solid var(--line); }
+.mr-lift:last-child { border: 0; }
+.mr-lift-n { font-weight: 800; font-size: 14px; }
+.mr-lift-b { display: flex; align-items: baseline; gap: 7px; margin-top: 3px; font-family: var(--font-d); font-size: 13.5px; }
+.mr-was { color: var(--ink2); font-weight: 700; }
+.mr-ar { color: var(--ink2); }
+.mr-now { font-weight: 900; }
+.mr-d { margin-left: auto; font-size: 12px; font-weight: 900; color: var(--ink2); }
+.mr-d.up { color: var(--good-text); }
+.mr-d.dn { color: var(--danger); }
+.mr-coach { background: var(--coach-bg); border-radius: 16px; padding: 14px; margin-top: 20px; }
+.mr-coach .kicker { color: var(--violet-ink); }
+.mr-lead { font-size: 14px; line-height: 1.5; }
+.mr-lead b { font-weight: 900; }
+.mr-rows { margin-top: 10px; }
+.mr-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; font-size: 13.5px; }
+.mr-row span { color: var(--ink2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-row b { margin-left: auto; font-family: var(--font-d); font-weight: 900; flex: none; }
+.mr-row b.up { color: var(--good-text); }
+.mr-row b.dn { color: var(--ink2); }
+.mr-touch { margin-top: 10px; font-size: 12px; color: var(--ink2); font-weight: 700; }
+.mr-pr { display: flex; align-items: baseline; gap: 9px; padding: 6px 0; font-size: 13.5px; }
+.mr-pr-n { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mr-pr-w { margin-left: auto; font-family: var(--font-d); font-weight: 900; flex: none; }
+.mr-pr-d { color: var(--ink2); font-size: 11.5px; flex: none; }
+.mr-card { display: block; width: 100%; text-align: left; cursor: pointer; }
+
 .step-fam { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .step-fam:last-child { border: 0; }
 .step-fam-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
@@ -3809,7 +3853,9 @@ function progressionStep(ex, prof, w) {
   if (!(w > 0)) return Math.max(grid, ex.inc);
   const pct = (ex.cat === 'isolation' ? 0.06 : 0.08) * w;
   const want = Math.min(ex.inc, Math.max(pct, grid * 0.5));
-  const n = Math.max(1, Math.round(want / grid));
+  // the most whole notches that fit UNDER the cap, never fewer than one. Rounding
+  // to nearest overshot it: a 55kg squat took +5 (9%) where +2.5 was loadable.
+  const n = Math.max(1, Math.floor(want / grid + 1e-9));
   return Math.round(n * grid * 100) / 100;
 }
 /* a deload must go DOWN. Rounding to the nearest grid point could land above
@@ -4199,6 +4245,339 @@ function alternativesFor(profile, exId, opts) {
     out.push(Object.assign({}, e, { _swap: sc }));
   }
   return out.sort((a, b) => b._swap - a._swap || a.name.localeCompare(b.name)).slice(0, (opts && opts.limit) || 8);
+}
+
+/* ---- the month report -----------------------------------------------------
+   The most-requested thing in the category and the one nobody ships: a page you
+   hand the athlete that says what happened and what the coaching did about it.
+   Almost all of it is already recorded. The one new idea is the counterfactual —
+   `coachingDelta` knows what the engine would have prescribed if left alone, so
+   this can say what the coach's judgement was actually worth, in kilos. */
+const ymOf = iso => String(iso || '').slice(0, 7);
+const ymNow = () => ymOf(U.todayISO());
+function ymShift(ym, n) {
+  const [y, m] = String(ym).split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function ymLabel(ym, short) {
+  const [y, m] = String(ym).split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined,
+    short ? { month: 'short', year: 'numeric' } : { month: 'long', year: 'numeric' });
+}
+const _pad2 = n => String(n).padStart(2, '0');
+
+/* Everything the report needs, computed once. Pure — no DOM, no side effects,
+   and it works identically for the athlete on her own profile and the coach on
+   a client's, because `_fsSrc` and `weeksSource` already make those symmetric. */
+function monthReport(prof, ym) {
+  const { src, logs: allLogs } = _fsSrc(prof);
+  const ws = weeksSource(prof);
+  const [Y, M] = String(ym).split('-').map(Number);
+  const lastDay = new Date(Y, M, 0).getDate();
+  const from = `${Y}-${_pad2(M)}-01`, to = `${Y}-${_pad2(M)}-${_pad2(lastDay)}`;
+  const today = U.todayISO();
+  const upto = to < today ? to : today;
+  const inMonth = d => d >= from && d <= to;
+
+  const logs = (allLogs || []).filter(l => inMonth(l.date)).slice().sort((a, b) => a.date < b.date ? -1 : 1);
+  const sport = (ws.sportLogs || []).filter(l => inMonth(l.date));
+
+  // what the plan asked for, counted only up to today
+  let planned = 0;
+  for (let d = 1; d <= lastDay; d++) {
+    const iso = `${Y}-${_pad2(M)}-${_pad2(d)}`;
+    if (iso > upto) break;
+    if ((ws.sched[(new Date(Y, M - 1, d).getDay() + 6) % 7] || 'rest') === 'lift') planned++;
+  }
+
+  let vol = 0, sets = 0, mins = 0, hard = 0, entries = 0;
+  for (const l of logs) {
+    mins += l.durationMin || 0;
+    for (const e of (l.entries || [])) {
+      entries++;
+      if (e.feel === 'hard') hard++;
+      const ex = EX_BY_ID[e.exId];
+      for (const st of (e.sets || [])) {
+        sets++;
+        if (!(ex && ex.timed)) vol += (st.w || 0) * (st.reps || 0);
+      }
+    }
+  }
+
+  // what moved: her best set in the month's first session vs its last
+  const byEx = {};
+  for (const l of logs) for (const e of (l.entries || [])) {
+    const ex = EX_BY_ID[e.exId];
+    if (!ex || ex.timed || ex.bw) continue;
+    const done = (e.sets || []).filter(st => (st.reps || 0) > 0 && (st.w || 0) > 0);
+    if (!done.length) continue;
+    const best = done.reduce((a, st) => e1rm(st.w, st.reps) > e1rm(a.w, a.reps) ? st : a, done[0]);
+    const r = byEx[e.exId] || (byEx[e.exId] = { exId: e.exId, name: ex.name, n: 0, first: null, last: null });
+    r.n++;
+    const pt = { date: l.date, w: best.w, reps: best.reps, e: e1rm(best.w, best.reps) };
+    if (!r.first) r.first = pt;
+    r.last = pt;
+  }
+  const moved = Object.values(byEx).filter(r => r.n >= 2)
+    .map(r => Object.assign(r, { d: Math.round((r.last.e - r.first.e) * 10) / 10,
+      pct: r.first.e ? (r.last.e - r.first.e) / r.first.e * 100 : 0 }))
+    .sort((a, b) => b.pct - a.pct);
+
+  const prs = Object.entries(ws.prs || {}).filter(([, p]) => p && inMonth(p.date))
+    .map(([exId, p]) => ({ exId, name: (EX_BY_ID[exId] || {}).name || exId, w: p.w, date: p.date }))
+    .sort((a, b) => a.date < b.date ? 1 : -1);
+
+  // ---- what the coach did about it ----
+  const delta = logs.length ? coachingDeltaIn(src, allLogs, from, to) : { n: 0 };
+  const pinned = logs.reduce((t, l) => t + (l.entries || []).filter(e => e.coachSet).length, 0);
+  const notes = (prof.coachThread || []).filter(n => {
+    if (n.from !== 'coach') return false;
+    const d = new Date(n.at || 0);
+    return isFinite(d) && ymOf(d.getFullYear() + '-' + _pad2(d.getMonth() + 1)) === ym;
+  }).length;
+  const inWk = wk => wk >= U.weekKey(from) && wk <= to;
+  let weekEdits = 0, moves = 0;
+  const wp = ((prof.plan || {}).weekPlan) || {};
+  for (const wk of Object.keys(wp)) if (inWk(wk))
+    for (const k of Object.keys(wp[wk] || {})) if ((wp[wk][k] || {}).by === 'coach') weekEdits++;
+  const dm = prof.dayMoves || {};
+  for (const wk of Object.keys(dm)) if (inWk(wk))
+    for (const k of Object.keys(dm[wk] || {})) if ((dm[wk][k] || {}).by === 'coach') moves++;
+
+  // ---- where it leaves her ----
+  const stdShim = { logs: (allLogs || []).filter(l => l.date <= to), bodyLogs: ws.bodyLogs || [],
+    units: ws.units, quiz: (src.quiz || prof.quiz || {}), exState: {} };
+  const stands = Object.keys(STD_RATIOS).map(id => ({ id, name: (EX_BY_ID[id] || {}).name || id, st: standardFor(stdShim, id) }))
+    .filter(x => x.st && byEx[x.id]).slice(0, 3);
+
+  return {
+    ym, from, to, upto, units: ws.units, who: ws.name, isCoach: ws.isCoach,
+    coachName: prof.coachSync ? (prof.coachSync.coachName || 'Your coach')
+      : (prof.isCoach ? (prof.coachDisplayName || 'You') : (prof.coachName || null)),
+    sessions: logs.length, planned, sport: sport.length,
+    adherence: planned ? Math.round(logs.length / planned * 100) : null,
+    vol: Math.round(vol), sets, mins, hardRate: entries ? hard / entries : 0,
+    moved, prs, delta, touches: { pinned, notes, weekEdits, moves },
+    stands, thin: logs.length < 3,
+    empty: logs.length === 0 && sport.length === 0,
+  };
+}
+/* one honest sentence about what the coaching was worth, or null */
+function deltaSentence(r) {
+  const d = r.delta;
+  if (!d || !d.n) return null;
+  const kg = Math.abs(d.avg);
+  if (kg < 0.25) return `${r.touches.pinned ? 'Weights were set by hand ' + d.n + ' times' : d.n + ' calls'}, and they matched where the engine would have gone on its own.`;
+  return d.avg > 0
+    ? `${d.n} ${U.plural(d.n, 'call')} on the weight, averaging <b>${U.fmtW(kg, r.units)}${U.unitLabel(r.units)} above</b> where the app would have gone alone.`
+    : `${d.n} ${U.plural(d.n, 'call')} on the weight, held <b>${U.fmtW(kg, r.units)}${U.unitLabel(r.units)} more conservative</b> than the app would have been alone.`;
+}
+
+/* ---- the month report, on screen -------------------------------------- */
+/* one line, always — a wrapped tile blows the whole row's height out */
+function mrHours(mins) {
+  if (!mins) return '0<small>m</small>';
+  return mins >= 60 ? `${Math.round(mins / 60)}<small>h</small>` : `${mins}<small>m</small>`;
+}
+function mrMovedRow(r, u) {
+  const up = r.d > 0.05, flat = Math.abs(r.d) <= 0.05;
+  return `<div class="mr-lift">
+    <div class="mr-lift-n">${U.esc(r.name)}</div>
+    <div class="mr-lift-b">
+      <span class="mr-was">${U.fmtW(r.first.w, u)}×${r.first.reps}</span>
+      <span class="mr-ar">→</span>
+      <span class="mr-now">${U.fmtW(r.last.w, u)}×${r.last.reps}</span>
+      <span class="mr-d ${up ? 'up' : flat ? '' : 'dn'}">${flat ? 'held' : (up ? '+' : '') + Math.round(r.pct) + '%'}</span>
+    </div>
+  </div>`;
+}
+function monthReportHtml(prof, ym) {
+  let r;
+  try { r = monthReport(prof, ym); }
+  catch (e) { return `<div class="empty">Couldn’t build this month’s report.</div>`; }
+  const u = r.units;
+  const first = (r.who === 'You' ? 'You' : U.esc(String(r.who).split(' ')[0]));
+  const has = r.who === 'You' ? 'you' : first;
+  const cn = r.coachName ? U.esc(r.coachName) : null;
+  const canBack = ym > '2020-01';
+  const canFwd = ym < ymNow();
+
+  const nav = `<div class="mr-nav">
+    <button class="mr-arrow" data-a="mr-go" data-v="${ymShift(ym, -1)}" ${canBack ? '' : 'disabled'}>‹</button>
+    <div class="mr-title"><b>${U.esc(ymLabel(ym))}</b><span>${first === 'You' ? 'Your month' : first + '’s month'}</span></div>
+    <button class="mr-arrow" data-a="mr-go" data-v="${ymShift(ym, 1)}" ${canFwd ? '' : 'disabled'}>›</button>
+  </div>`;
+
+  if (r.empty) {
+    return `${nav}<div class="empty">Nothing logged in ${U.esc(ymLabel(ym, true))}.${canFwd ? '' : ' It fills in as ' + (has === 'you' ? 'you train' : has + ' trains') + '.'}</div>`;
+  }
+
+  const adh = r.adherence == null ? null
+    : r.adherence >= 100 ? 'every session' : `${r.sessions} of ${r.planned}`;
+
+  const tiles = `<div class="mr-tiles">
+    <div class="mr-t"><div class="v">${r.sessions}${r.planned ? `<small>/${r.planned}</small>` : ''}</div><div class="lb">${U.plural(r.sessions, 'session')}</div></div>
+    <div class="mr-t"><div class="v">${mrHours(r.mins)}</div><div class="lb">training</div></div>
+    <div class="mr-t"><div class="v">${U.compact(r.vol)}<small>${U.unitLabel(u)}</small></div><div class="lb">lifted</div></div>
+    <div class="mr-t"><div class="v">${r.prs.length}</div><div class="lb">new ${U.plural(r.prs.length, 'best')}</div></div>
+  </div>`;
+
+  const moved = r.moved.slice(0, 6);
+  const movedBlock = moved.length ? `<div class="mr-sec">
+      <div class="kicker">What moved</div>
+      ${moved.map(x => mrMovedRow(x, u)).join('')}
+      ${r.thin ? '<p class="muted mt8" style="font-size:12px">Only a session or two — read this as a snapshot, not a trend.</p>' : ''}
+    </div>` : '';
+
+  const prBlock = r.prs.length ? `<div class="mr-sec">
+      <div class="kicker">Personal bests</div>
+      ${r.prs.slice(0, 5).map(p => `<div class="mr-pr"><span class="mr-pr-n">${U.esc(p.name)}</span><span class="mr-pr-w">${U.fmtW(p.w, u)}${U.unitLabel(u)}</span><span class="mr-pr-d">${U.fmtDateShort(p.date)}</span></div>`).join('')}
+    </div>` : '';
+
+  // the section nobody else can write
+  const ds = deltaSentence(r);
+  const t = r.touches;
+  const touchBits = [
+    t.pinned ? `${t.pinned} ${U.plural(t.pinned, 'weight')} set by hand` : null,
+    t.weekEdits ? `${t.weekEdits} ${U.plural(t.weekEdits, 'week')} rewritten` : null,
+    t.moves ? `${t.moves} ${U.plural(t.moves, 'day')} moved` : null,
+    t.notes ? `${t.notes} ${U.plural(t.notes, 'note')} sent` : null,
+  ].filter(Boolean);
+  const coachBlock = (ds || touchBits.length) ? `<div class="mr-sec mr-coach">
+      <div class="kicker">${cn && cn !== 'You' ? U.esc(cn) + '’s part in it' : 'What the coaching did'}</div>
+      ${ds ? `<p class="mr-lead">${ds}</p>` : ''}
+      ${r.delta.n && r.delta.rows.length > 1 ? `<div class="mr-rows">${r.delta.rows.slice(0, 4).map(row =>
+        `<div class="mr-row"><span>${U.esc(row.name)}</span><b class="${row.avg > 0 ? 'up' : row.avg < 0 ? 'dn' : ''}">${row.avg > 0 ? '+' : ''}${U.fmtW(row.avg, u)}${U.unitLabel(u)}</b></div>`).join('')}</div>` : ''}
+      ${touchBits.length ? `<div class="mr-touch">${touchBits.join(' · ')}</div>` : ''}
+    </div>` : '';
+
+  const standBlock = r.stands.length ? `<div class="mr-sec">
+      <div class="kicker">Where that puts ${has}</div>
+      ${r.stands.map(x => `<div class="mr-lift">
+        <div class="mr-lift-n">${U.esc(x.name)}</div>
+        <div class="mr-lift-b"><span class="mr-now">${U.esc(x.st.band)}</span>${x.st.next
+          ? `<span class="mr-was">${U.fmtW(x.st.toNext, u)}${U.unitLabel(u)} to ${U.esc(x.st.next.band)}</span>` : ''}</div>
+      </div>`).join('')}
+    </div>` : '';
+
+  const cardio = r.sport ? `<div class="mr-touch" style="margin-top:2px">${r.sport} cardio ${U.plural(r.sport, 'session')} on top</div>` : '';
+
+  return `${nav}${tiles}${cardio}${movedBlock}${coachBlock}${prBlock}${standBlock}
+    <button class="btn ghost block mt16" data-a="mr-share" data-v="${ym}">Share this</button>`;
+}
+function showMonthReportSheet(prof, ym) {
+  App.mrYm = ym || App.mrYm || ymNow();
+  showSheet(`<div class="mr">${monthReportHtml(prof, App.mrYm)}</div>`);
+}
+/* the entry point on Progress — a live preview, not just a link */
+function monthCardHtml(prof) {
+  let r;
+  try { r = monthReport(prof, ymNow()); } catch (e) { return ''; }
+  const who = r.who === 'You' ? 'Your' : U.esc(String(r.who).split(' ')[0]) + '’s';
+  const u = r.units;
+  const line = r.empty ? 'Nothing logged yet this month.'
+    : `${r.sessions} ${U.plural(r.sessions, 'session')} · ${U.compact(r.vol)}${U.unitLabel(u)} lifted${r.prs.length ? ` · ${r.prs.length} new ${U.plural(r.prs.length, 'best')}` : ''}`;
+  return `<button class="card mr-card" data-a="mr-open">
+    <div class="row"><h3>${who} month</h3><span class="spacer"></span><span class="go" style="color:var(--ink3)">›</span></div>
+    <div class="muted mt8">${U.esc(ymLabel(ymNow()))} · ${line}</div>
+  </button>`;
+}
+
+/* The shareable version. Same numbers, drawn on a canvas in the app's own
+   palette so it survives being forwarded — which is the whole point of it. */
+async function shareMonth(prof, ym) {
+  let r;
+  try { r = monthReport(prof, ym || ymNow()); } catch (e) { toast('Couldn’t build that month'); return; }
+  if (r.empty) { toast('Nothing logged that month yet'); return; }
+  const u = r.units, W = 1080, H = 1350;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const F = (w, px) => `${w} ${px}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+  const INK = '#252A31', INK2 = '#5A616C', INK3 = '#858B96', PAPER = '#F8F9FB', LINE = 'rgba(37,42,49,0.12)';
+  const rr = (x, y, w, h, rad) => { g.beginPath(); g.roundRect(x, y, w, h, rad); g.fill(); };
+
+  g.fillStyle = '#E9EBEE'; g.fillRect(0, 0, W, H);
+  g.fillStyle = INK; rr(0, 0, W, 300, 0);
+  g.textAlign = 'left';
+  g.fillStyle = 'rgba(255,255,255,0.62)'; g.font = F(800, 30);
+  g.fillText('LIFTOFF', 70, 92);
+  g.fillStyle = '#fff'; g.font = F(900, 76);
+  const nm = r.who === 'You' ? (prof.name || 'My month') : String(r.who).split(' ')[0] + '’s month';
+  g.fillText(nm, 70, 186);
+  g.fillStyle = 'rgba(255,255,255,0.72)'; g.font = F(700, 36);
+  g.fillText(ymLabel(ym), 70, 240);
+
+  // four numbers
+  g.fillStyle = PAPER; rr(50, 250, W - 100, 250, 34);
+  const stat = (cx, big, small) => {
+    g.textAlign = 'center';
+    g.fillStyle = INK; g.font = F(900, 66); g.fillText(big, cx, 372);
+    g.fillStyle = INK3; g.font = F(700, 26); g.fillText(small, cx, 422);
+  };
+  const cols = [180, 415, 665, 900];
+  stat(cols[0], String(r.sessions), r.planned ? `of ${r.planned} sessions` : 'sessions');
+  stat(cols[1], (r.mins >= 60 ? Math.round(r.mins / 60) + 'h' : r.mins + 'm'), 'training');
+  stat(cols[2], U.compact(r.vol), U.unitLabel(u) + ' lifted');
+  stat(cols[3], String(r.prs.length), 'new bests');
+
+  // what moved
+  let y = 560;
+  g.textAlign = 'left';
+  g.fillStyle = INK3; g.font = F(800, 26); g.fillText('WHAT MOVED', 70, y);
+  y += 26;
+  const moved = r.moved.slice(0, 4);
+  if (moved.length) {
+    for (const m of moved) {
+      g.fillStyle = LINE; g.fillRect(70, y, W - 140, 2);
+      y += 52;
+      g.fillStyle = INK; g.font = F(800, 34);
+      g.fillText(m.name.length > 26 ? m.name.slice(0, 25) + '…' : m.name, 70, y);
+      g.textAlign = 'right';
+      g.fillStyle = m.d > 0.05 ? '#2F6147' : INK2; g.font = F(900, 34);
+      g.fillText(`${U.fmtW(m.first.w, u)} → ${U.fmtW(m.last.w, u)}${U.unitLabel(u)}`, W - 70, y);
+      g.textAlign = 'left';
+      y += 22;
+    }
+    g.fillStyle = LINE; g.fillRect(70, y, W - 140, 2);
+  } else {
+    y += 46; g.fillStyle = INK2; g.font = F(700, 32);
+    g.fillText('Logged and banked — the trend needs another week.', 70, y);
+  }
+
+  // the coaching line — the bit no other app can print
+  const ds = deltaSentence(r);
+  if (ds) {
+    const plain = ds.replace(/<[^>]+>/g, '');
+    g.fillStyle = '#EBECF1'; rr(50, H - 440, W - 100, 258, 30);
+    g.fillStyle = '#434E63'; g.font = F(800, 26);
+    g.fillText((r.coachName && r.coachName !== 'You' ? r.coachName.toUpperCase() + '’S PART IN IT' : 'WHAT THE COACHING DID'), 80, H - 380);
+    g.fillStyle = INK; g.font = F(700, 32);
+    // wrap to at most three lines, and ellipsise rather than stop mid-sentence
+    const lines = [];
+    let line = '';
+    for (const w of plain.split(' ')) {
+      const t = line ? line + ' ' + w : w;
+      if (g.measureText(t).width > W - 180) { lines.push(line); line = w; } else line = t;
+    }
+    if (line) lines.push(line);
+    if (lines.length > 3) { lines.length = 3; lines[2] = lines[2].replace(/[,.\s]*$/, '') + '…'; }
+    lines.forEach((t, i) => g.fillText(t, 80, H - 330 + i * 42));
+  }
+
+  g.fillStyle = INK3; g.font = F(700, 26); g.textAlign = 'center';
+  g.fillText('made with LiftOff', W / 2, H - 60);
+
+  const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+  const file = new File([blob], `liftoff-${ym}.png`, { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: `${nm} — ${ymLabel(ym)}` }); return; } catch (e) { /* cancelled */ }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `liftoff-${ym}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('Saved — share it wherever you like');
 }
 
 /* ---- coach insights ---- */
@@ -6141,7 +6520,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.36.0';
+const APP_VERSION = '3.37.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -8642,9 +9021,7 @@ function simulatePlan(src, logs, opts) {
 /* What did the coaching actually buy? Replaying the real logs records, at each
    coach-set prescription, what the engine would have called on its own. The
    difference is the coach's hand on the dial, in kilos. */
-function coachingDelta(src, logs) {
-  const sim = simProfileFrom(src, logs);
-  const iv = sim._interventions || [];
+function _aggDelta(iv) {
   if (!iv.length) return { n: 0 };
   const byEx = {};
   let sum = 0;
@@ -8657,6 +9034,18 @@ function coachingDelta(src, logs) {
   const rows = Object.values(byEx).map(r => ({ ...r, avg: r.sum / r.n,
     name: (EX_BY_ID[r.exId] || {}).name || r.exId })).sort((a, b) => Math.abs(b.avg) - Math.abs(a.avg));
   return { n: iv.length, avg: sum / iv.length, rows, from: iv[0].date, to: iv[iv.length - 1].date };
+}
+function coachingDelta(src, logs) {
+  return _aggDelta((simProfileFrom(src, logs)._interventions || []));
+}
+/* The same number, scoped to a window. Replays everything up to the END of the
+   window first, so autopilot already holds an opinion when the window opens —
+   otherwise the first session of every month scores nothing. */
+function coachingDeltaIn(src, logs, fromISO, toISO) {
+  const upTo = (logs || []).filter(l => l.date <= toISO);
+  let iv = [];
+  try { iv = simProfileFrom(src, upTo)._interventions || []; } catch (e) { iv = []; }
+  return _aggDelta(iv.filter(x => x.date >= fromISO && x.date <= toISO));
 }
 
 /* Does this athlete perform better with more rest? Group each lift's sessions by
@@ -9080,6 +9469,7 @@ function renderProgress(prof) {
       </select>` : ''}
       ${strengthChart}${bestLine}
     </div>
+    ${monthCardHtml(prof)}
     ${foresightCardHtml(prof)}
     ${standardsCardHtml(prof)}
     <div class="card">
@@ -9643,6 +10033,9 @@ function dispatch(e) {
     if (prof.coachSync) { prof.coachSync.pendingProgress = true; setTimeout(() => syncTick(true), 800); } // coach's view of you follows
     saveApp(); render(); return;
   }
+  if (a === 'mr-open') { App.mrYm = ymNow(); sheetRoot('Month', showMonthReportSheet, prof, App.mrYm); return; }
+  if (a === 'mr-go') { App.mrYm = el.dataset.v; showMonthReportSheet(prof, App.mrYm); return; }
+  if (a === 'mr-share') { shareMonth(prof, el.dataset.v); return; }
   if (a === 'steps-open') { sheetRoot('Weight steps', showStepsSheet, prof); return; }
   if (a === 'step-fam-set') { stepStore(prof).fam[el.dataset.fam] = +el.dataset.v; saveApp(); showStepsSheet(prof); return; }
   if (a === 'step-fam-reset') { delete stepStore(prof).fam[el.dataset.fam]; saveApp(); showStepsSheet(prof); return; }
@@ -11225,6 +11618,7 @@ function weeksSource(prof) {
     isCoach,
     logs: isCoach ? (pg.logs || []) : (prof.logs || []),
     sportLogs: isCoach ? (pg.sportLogs || []) : (prof.sportLogs || []),
+    bodyLogs: isCoach ? (pg.bodyLogs || []) : (prof.bodyLogs || []),
     prs: isCoach ? (pg.prs || {}) : (prof.prs || {}),
     units: isCoach ? (pg.units || prof.units) : prof.units,
     sched: (isCoach ? ((pg.quiz || {}).weekSchedule) : prof.quiz.weekSchedule) || {},
@@ -11717,6 +12111,7 @@ function renderCoachProgress(prof) {
       <div class="tile"><div class="lb">Personal records</div><div class="v">${prCount}</div></div>
       <div class="tile"><div class="lb">Total workouts</div><div class="v">${pg.totals ? pg.totals.workouts : shim.logs.length}</div></div>
     </div>
+    ${monthCardHtml(prof)}
     ${standardsCardHtml(stdShim)}
     ${sessions.length ? `<div class="card"><h3>Recent sessions</h3><div class="mt8">
       ${sessions.map(l => {

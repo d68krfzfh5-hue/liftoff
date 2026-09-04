@@ -3688,6 +3688,13 @@ const STEP_FAMILIES = {
   other:      { label: 'Anything else', hint: 'belts, bands, odd objects',   kg: 2.5, lb: 5,  optsKg: [0.5, 1, 2.5, 5],        optsLb: [1, 2.5, 5, 10] },
 };
 const STEP_FAM_ORDER = ['barbell', 'dumbbell', 'cable', 'machine', 'plate', 'kettlebell', 'other'];
+/* A dumbbell rack is dense at the bottom and sparse at the top — 1kg apart up to
+   about 10kg, then 2.5, then 5. One flat number skips the weights she actually
+   picks up: Izzy trains at 4kg and 5kg, which a 2.5kg grid cannot even express. */
+function dbRackStep(w, units) {
+  if (units === 'lb') { const lb = U.toLb(w || 0); return U.toKg(lb < 25 ? 2.5 : 5, 'lb'); }
+  return !(w > 0) ? 1 : w < 10 ? 1 : w < 26 ? 2.5 : 5;
+}
 /* leg press, hack squat and the machine hip thrust take plates, not a pin */
 const PLATE_LOADED = new Set(['leg_press', 'hack_squat', 'machine_hipthrust']);
 function stepFamily(ex) {
@@ -3708,21 +3715,23 @@ function stepStore(prof) {
   prof.steps.learn = prof.steps.learn || {};
   return prof.steps;
 }
-function famStepKg(prof, fam) {
+function famStepKg(prof, fam, w) {
   const F = STEP_FAMILIES[fam] || STEP_FAMILIES.other;
   const s = stepStore(prof);
   if (s.fam[fam] != null && +s.fam[fam] > 0) return +s.fam[fam];
+  if (fam === 'dumbbell') return dbRackStep(w, prof.units);   // follows the rack
   return (prof.units === 'lb') ? U.toKg(F.lb, 'lb') : F.kg;
 }
 /* what one press of +/- moves, in kg. Pinned exercise wins, then a family the
    athlete has set, then anything we've learned from her loads, then the default. */
-function stepForEx(prof, ex) {
+function stepForEx(prof, ex, w) {
   if (!ex || !prof) return 2.5;
   const s = stepStore(prof);
   if (s.ex[ex.id] != null && +s.ex[ex.id] > 0) return +s.ex[ex.id];
   const fam = stepFamily(ex);
   if (s.fam[fam] == null && s.learn[ex.id] != null && +s.learn[ex.id] > 0) return +s.learn[ex.id];
-  return famStepKg(prof, fam);
+  if (w == null && fam === 'dumbbell') w = ((prof.exState || {})[ex.id] || {}).w;
+  return famStepKg(prof, fam, w);
 }
 function stepSourceFor(prof, ex) {
   const s = stepStore(prof);
@@ -3757,12 +3766,15 @@ function relearnStep(prof, exId) {
   if (seen.size < 5) { delete s.learn[exId]; return; }
   let g = 0; for (const v of seen) g = _gcdInt(g, v);
   const kg = g / 100;
-  const base = famStepKg(prof, stepFamily(ex));
+  const base = famStepKg(prof, stepFamily(ex), Math.max(...seen) / 100);
   const round = Math.abs(kg * 4 - Math.round(kg * 4)) < 1e-6;
-  if (kg > base + 1e-6 && kg <= 10 && round) s.learn[exId] = kg;
+  // Every load she has ever used is a multiple of this, so it IS her grid —
+  // coarser than we assumed (a 7kg stack) or finer (light dumbbells 1kg apart).
+  // Floored at 0.5kg so noise can never turn the stepper into a dribble.
+  if (round && kg >= 0.5 && kg <= 10 && Math.abs(kg - base) > 1e-6) s.learn[exId] = kg;
   else delete s.learn[exId];
 }
-const roundStepFor = (ex, prof) => prof ? stepForEx(prof, ex)
+const roundStepFor = (ex, prof, w) => prof ? stepForEx(prof, ex, w)
   : (ex && ex.inc <= 1 ? 0.5 : ex && ex.inc <= 2 ? 1 : 2.5);
 
 /* ---- dumbbells: one, or both? --------------------------------------------
@@ -3774,6 +3786,41 @@ const DB_PAIR = new Set(['curl_db', 'hammer_curl', 'lat_raise', 'reardelt_fly', 
 const isDbPair = ex => !!ex && DB_PAIR.has(ex.id);
 /* the unit tag under a weight: KG, or KG EACH when there are two dumbbells */
 const wUnitTag = (ex, units) => U.unitLabel(units).toUpperCase() + (isDbPair(ex) ? ' EACH' : '');
+
+/* ---- what she was ACTUALLY lifting -------------------------------------
+   The engine used the heaviest single set as "her weight". Izzy did 4, 4, 5 —
+   one set at 5 — and the app called that 5kg, added 2, and prescribed 7. The
+   honest answer is the weight most of her sets were done at, lower on a tie. */
+function workingWeight(done) {
+  const w = done.map(s => +s.w || 0).filter(x => x > 0);
+  if (!w.length) return 0;
+  const n = {};
+  for (const x of w) n[x] = (n[x] || 0) + 1;
+  let best = null;
+  for (const k of Object.keys(n).map(Number).sort((a, b) => a - b))
+    if (best == null || n[k] > n[best]) best = k;     // ties keep the lighter one
+  return best;
+}
+/* how much to add when she earns it: never more than the exercise's design
+   increment, never a wild fraction of what she is lifting, and always a whole
+   number of notches she can actually load. +2kg on a 4kg press is +50%. */
+function progressionStep(ex, prof, w) {
+  const grid = roundStepFor(ex, prof, w);
+  if (!(w > 0)) return Math.max(grid, ex.inc);
+  const pct = (ex.cat === 'isolation' ? 0.06 : 0.08) * w;
+  const want = Math.min(ex.inc, Math.max(pct, grid * 0.5));
+  const n = Math.max(1, Math.round(want / grid));
+  return Math.round(n * grid * 100) / 100;
+}
+/* a deload must go DOWN. Rounding to the nearest grid point could land above
+   where she started (7kg on a 2.5 grid → 7.5), which is not a deload. */
+function deloadWeight(cur, ex, prof) {
+  const grid = roundStepFor(ex, prof, cur);
+  let w = Math.round((cur * 0.9) / grid) * grid;      // closest loadable to -10%
+  if (w >= cur - 1e-9) w = cur - grid;                // ...but it must actually drop
+  w = Math.round(Math.max(0, w) * 100) / 100;
+  return w > 0 ? w : null;      // null = already at the bottom, drop reps instead
+}
 
 function exState(profile, exId) {
   profile.exState = profile.exState || {};
@@ -3808,8 +3855,9 @@ function startWeightEst(profile, ex) {
   else if (eq.includes('dumbbell') || eq.includes('kettlebell')) base = iso ? 6 : 12;
   else base = 8;
   if (iso && eq.includes('barbell')) base *= 0.6;
-  const step = roundStepFor(ex, profile);
-  return Math.max(step, Math.round(base * lvlF * sexF / step) * step);
+  const est = base * lvlF * sexF;
+  const step = roundStepFor(ex, profile, est);
+  return Math.max(step, Math.round(est / step) * step);
 }
 /* numeric weight behind a plan exercise. A pinned weight (coach/athlete set)
    wins; else coach reads the client's synced top set, the athlete reads her own
@@ -3840,8 +3888,9 @@ function planWeightDisplay(profile, planEx) {
 }
 
 /* After a workout is finished: update per-exercise state; returns array of feedback msgs */
-function applyProgression(profile, log) {
+function applyProgression(profile, log, opts) {
   const q = profile.quiz;
+  const noAnchor = !!(opts && opts.noAnchor);
   const mode = GOALS[q.goal].progression;
   const msgs = [];
   for (const entry of log.entries) {
@@ -3851,6 +3900,7 @@ function applyProgression(profile, log) {
     const st = exState(profile, entry.exId);
     const planEx = entry.plan || { repsMin: 8, repsMax: 12 };
     const topW = Math.max(...done.map(s => s.w || 0));
+    const workW = workingWeight(done);
     const bestSet = done.reduce((a, s) => e1rm(s.w || 0, s.reps) > e1rm(a.w || 0, a.reps) ? s : a, done[0]);
     st.history.push({ date: log.date, topW, bestReps: bestSet.reps, e1rm: e1rm(bestSet.w || 0, bestSet.reps), vol: done.reduce((t, s) => t + (s.w || 0) * s.reps, 0) });
     if (st.history.length > 400) st.history.shift();
@@ -3874,12 +3924,30 @@ function applyProgression(profile, log) {
       msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: go for ${st.repTarget} reps next time.` });
       continue;
     }
-    if (st.w == null) { st.w = topW; }
+    if (st.w == null) { st.w = workW || topW; }
+
+    /* She trained at a different weight from the one we put in front of her.
+       That is her answer, not a mistake — follow it, or we spend every session
+       insisting on a number she has already decided against. */
+    const shown = noAnchor ? null : entry.targetW;
+    if (workW > 0 && shown != null && Math.abs(workW - shown) > 0.01 && Math.abs(workW - st.w) > 0.01) {
+      const _was = st.w;
+      st.w = workW;
+      st.anchored = { from: _was, to: workW, date: log.date };
+      msgs.push({ exId: ex.id, kind: 'anchor',
+        text: `${ex.name}: you worked at ${workW}kg, not ${shown}kg — going from ${workW}kg now.` });
+    } else { delete st.anchored; }
 
     if (anyMiss) {
       st.fails++; st.ups = 0;
       if (st.fails >= 2) {
-        const newW = Math.max(0, U.round(st.w * 0.9, roundStepFor(ex, profile)));
+        const newW = deloadWeight(st.w, ex, profile);
+        if (newW == null) {
+          st.why = { k: 'floor', to: st.w };
+          msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: staying at ${st.w}kg — chase the reps rather than the weight.` });
+          st.fails = 0; st.repTarget = planEx.repsMin;
+          continue;
+        }
         msgs.push({ exId: ex.id, kind: 'deload', text: `${ex.name}: two tough sessions — dropping to ${newW}kg to rebuild momentum. You’ll be past ${st.w}kg again in no time.` });
         st.why = { k: 'deload', from: st.w, to: newW };
         st.w = newW; st.fails = 0; st.repTarget = planEx.repsMin;
@@ -3903,8 +3971,8 @@ function applyProgression(profile, log) {
     if (mode === 'linear') {
       if (!hard || st.ups === 0 || rail === 'push') {
         const _from = st.w;
-        st.w = capped(U.round((st.w || topW) + ex.inc, 0.5)); st.ups++; st.fails = 0; st.repTarget = planEx.repsMin;
-        st.why = st.w === _from ? { k: 'atcap', to: st.w } : { k: 'up', from: _from, to: st.w };
+        st.w = capped(U.round((st.w || workW) + progressionStep(ex, profile, st.w || workW), 0.25)); st.ups++; st.fails = 0; st.repTarget = planEx.repsMin;
+        st.why = st.w === _from ? { k: 'atcap', to: st.w } : { k: 'up', from: _from, to: st.w, reps: [planEx.repsMin, planEx.repsMax] };
         msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: moving up to ${st.w}kg next session.` });
       } else {
         st.why = { k: 'hardhold', to: st.w };
@@ -3914,10 +3982,10 @@ function applyProgression(profile, log) {
       const fullSets = done.length >= (entry.plan ? entry.plan.sets : done.length);
       if (fullSets && (!hard || rail === 'push')) {
         const _from = st.w;
-        st.w = capped(U.round((st.w || topW) + ex.inc, 0.5)); st.repTarget = planEx.repsMin; st.ups++; st.fails = 0;
+        st.w = capped(U.round((st.w || workW) + progressionStep(ex, profile, st.w || workW), 0.25)); st.repTarget = planEx.repsMin; st.ups++; st.fails = 0;
         st.why = st.w === _from ? { k: 'atcap', to: st.w }
           : (hard && rail === 'push') ? { k: 'pushup', from: _from, to: st.w }
-          : { k: 'up', from: _from, to: st.w };
+          : { k: 'up', from: _from, to: st.w, reps: [planEx.repsMin, planEx.repsMax] };
         msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: all sets in range — weight goes up to ${st.w}kg next time!` });
       } else if (fullSets && hard) {
         st.repTarget = allTop ? planEx.repsMax : Math.min(Math.max(...done.map(s => s.reps)) + 1, planEx.repsMax);
@@ -4986,7 +5054,7 @@ function applyDeload(prof, planEx, target) { // adjust prefilled targets during 
   const ex = EX_BY_ID[planEx.exId];
   const t = Object.assign({}, target);
   t.sets = Math.max(2, (planEx.sets || 3) - 1);
-  if (t.w != null && ex && !ex.bw && !ex.timed) t.w = Math.max(0, U.round(t.w * 0.9, roundStepFor(ex, prof)));
+  if (t.w != null && ex && !ex.bw && !ex.timed) t.w = Math.max(0, U.round(t.w * 0.9, roundStepFor(ex, prof, t.w)));
   t.deload = true;
   return t;
 }
@@ -6073,7 +6141,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.35.0';
+const APP_VERSION = '3.36.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6293,14 +6361,23 @@ function whyFor(prof, pe, t, ctx) {
   if (t.isNew) return 'First time on this one — pick a weight you could stop 2 reps short of failing with';
   const st = (prof.exState || {})[pe.exId] || {};
   const y = st.why;
+  if (st.anchored) {                       // she chose a different weight — say so
+    const a = st.anchored;
+    return (y && y.k === 'up' && Math.abs(y.from - a.to) < 0.01)
+      ? `You worked at ${w(a.to)}, not the ${w(a.from)} suggested — up from there`
+      : `Following what you actually lifted — ${w(a.to)}, not ${w(a.from)}`;
+  }
   if (!y) return '';
-  if (y.k === 'up') return y.from ? `Up from ${w(y.from)} — you finished every set in range last time` : 'Moving up — you finished every set last time';
+  if (y.k === 'up') return y.from
+    ? `Up from ${w(y.from)} — every set hit ${y.reps ? y.reps[0] + '–' + y.reps[1] : 'the target'} reps last time`
+    : 'Moving up — you finished every set last time';
   if (y.k === 'deload') return `Dropped from ${w(y.from)} after two tough sessions — rebuilding from here`;
   if (y.k === 'miss') return 'Same weight again — the reps slipped last time';
   if (y.k === 'hardhold') return 'Same weight — you rated it hard, so it holds until it feels easier';
   if (y.k === 'finish') return `Same weight — finish all ${y.sets || pe.sets} sets in range and it goes up`;
   if (y.k === 'coachhold') return `${U.esc(coachName)} is holding this weight — chase the reps instead`;
   if (y.k === 'pushup') return y.from ? `Up from ${w(y.from)} — ${U.esc(coachName)} wants this one pushed` : `Pushed up — ${U.esc(coachName)}'s call`;
+  if (y.k === 'floor') return 'Same weight — the reps are the thing to chase from here';
   if (y.k === 'atcap') return `At the ceiling ${U.esc(coachName)} set — reps from here`;
   if (y.k === 'reps') return `Going for ${y.to} reps — one more than last time`;
   if (y.k === 'secs') return `Going for ${y.to}s — five more than last time`;
@@ -6316,7 +6393,7 @@ function buildEntries(prof, exercises) {
     if (easy) t = applyDeload(prof, pe, Object.assign({ sets: pe.sets }, t));
     const ex0 = EX_BY_ID[pe.exId];
     if (rm && rm.mod !== 1 && t.w && ex0 && !ex0.bw && !ex0.timed) {  // readiness eases/bumps today's loads
-      t = Object.assign({}, t, { w: Math.max(0, U.round(t.w * rm.mod, roundStepFor(ex0, prof))) });
+      t = Object.assign({}, t, { w: Math.max(0, U.round(t.w * rm.mod, roundStepFor(ex0, prof, t.w))) });
     }
     const nSets = easy && t.sets ? t.sets : pe.sets;
     const sets = [];
@@ -7541,7 +7618,7 @@ function workoutAction(a, el, prof) {
   if (a === 'wo-step') {
     const e = w.entries[+el.dataset.ei], s = e.sets[+el.dataset.si];
     const ex = EX_BY_ID[e.exId];
-    if (el.dataset.f === 'w') s.w = snapStep(s.w, stepForEx(prof, ex), +el.dataset.d);
+    if (el.dataset.f === 'w') s.w = snapStep(s.w, stepForEx(prof, ex, s.w), +el.dataset.d);
     else s.reps = U.clamp(s.reps + (+el.dataset.d) * (ex.timed ? 5 : 1), 0, ex.timed ? 300 : 50);
     prof.activeWorkout = w; saveApp();
     const v = el.parentElement.querySelector('.v');
@@ -7937,13 +8014,16 @@ function showExStepSheet(prof, exId) {
 function exStepBody(prof, exId) {
   const ex = EX_BY_ID[exId]; if (!ex) return;
   const fam = stepFamily(ex);
-  const cur = stepForEx(prof, ex);
+  const atW = ((prof.exState || {})[exId] || {}).w;
+  const cur = stepForEx(prof, ex, atW);
   const src = stepSourceFor(prof, ex);
   const opts = stepOptsFor(prof, fam);
   const extra = opts.some(v => Math.abs(v - cur) < 0.005) ? [] : [cur];
   const srcWord = src === 'pinned' ? 'set for this exercise' : src === 'family'
     ? `from your ${STEP_FAMILIES[fam].label.toLowerCase()} setting` : src === 'learned'
-    ? 'matched to the loads you log here' : `the usual for ${STEP_FAMILIES[fam].label.toLowerCase()}`;
+    ? 'matched to the loads you log here'
+    : fam === 'dumbbell' ? `what a rack does around ${fmtStep(atW > 0 ? atW : cur, prof.units)}`
+    : `the usual for ${STEP_FAMILIES[fam].label.toLowerCase()}`;
   showSheet(`<h3 style="font-size:19px;font-weight:900">Weight steps</h3>
     <p class="muted mt8" style="margin-bottom:12px">${U.esc(ex.name)} moves in <b>${fmtStep(cur, prof.units)}</b> — ${srcWord}.</p>
     <div class="step-opts">${opts.concat(extra).map(v =>
@@ -8392,6 +8472,10 @@ function simProfileFrom(src, logs) {
     exState: {}, prs: {}, logs: [], readiness: {}, flags: {}, units: src.units || 'kg',
   };
   const seen = [];
+  /* The counterfactual — "what would the engine have said if left alone" — has
+     to come from a shadow that never follows the athlete's own weight choices,
+     or it just reads back the coach's number and every delta comes out zero. */
+  const autoSim = { quiz: q, plan: sim.plan, exState: {}, prs: {}, logs: [], readiness: {}, flags: {}, units: sim.units };
   for (const l of (logs || [])) {
     const entries = (l.entries || []).map(e => ({
       exId: e.exId, feel: e.feel || null, plan: e.plan || planExFor(sim, e.exId),
@@ -8401,9 +8485,10 @@ function simProfileFrom(src, logs) {
     // capture what the ENGINE would have prescribed, before the log moves it on
     for (const e of entries) {
       if (!e.coachSet || e.targetW == null) continue;
-      const auto = nextTargets(sim, e.plan).w;
+      const auto = nextTargets(autoSim, e.plan).w;
       if (auto != null) seen.push({ exId: e.exId, date: l.date, coach: e.targetW, auto });
     }
+    applyProgression(autoSim, { date: l.date, entries }, { noAnchor: true });
     applyProgression(sim, { date: l.date, entries });
     sim.logs.push({ date: l.date, entries });
   }
@@ -9879,7 +9964,7 @@ function customAction(a, el, prof) {
     const ex = EX_BY_ID[pe.exId];
     const delta = +el.dataset.d, inc = (ex && ex.inc) || 2.5;
     const base = pe.w != null ? +pe.w : (resolvePlanWeight(prof, pe).w || 0);
-    pe.w = U.clamp(U.round(base + delta * inc, roundStepFor(ex, prof)), 0, 999);
+    pe.w = U.clamp(U.round(base + delta * inc, roundStepFor(ex, prof, base)), 0, 999);
     showBuilderSheet(prof); return;
   }
   if (a === 'cw-wclear') { // back to Auto — progression drives the weight again
@@ -9898,7 +9983,7 @@ function customAction(a, el, prof) {
     const ex = EX_BY_ID[pe.exId];
     const inc = (ex && ex.inc) || 2.5, delta = +el.dataset.d;
     const base = pe.cap != null ? +pe.cap : (resolvePlanWeight(prof, pe).w || 0);
-    const next = U.round(base + delta * inc, roundStepFor(ex, prof));
+    const next = U.round(base + delta * inc, roundStepFor(ex, prof, base));
     if (next <= 0) delete pe.cap; else pe.cap = U.clamp(next, 0, 999);
     showBuilderSheet(prof); return;
   }
@@ -9931,12 +10016,12 @@ function customAction(a, el, prof) {
       const raw = (inp.value || '').trim();
       if (f === 'cap') { // blank or "none" → no ceiling
         if (raw === '' || /none|auto/i.test(raw)) delete pe.cap;
-        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n > 0) pe.cap = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId], prof)), 0, 999); }
+        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n > 0) pe.cap = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId], prof, n)), 0, 999); }
         showBuilderSheet(prof); return;
       }
       if (f === 'w') { // blank or "auto" → progression drives it; a number pins it
         if (raw === '' || /auto/i.test(raw)) delete pe.w;
-        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n >= 0) pe.w = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId], prof)), 0, 999); }
+        else { const n = parseFloat(raw.replace(/[^0-9.]/g, '')); if (!isNaN(n) && n >= 0) pe.w = U.clamp(U.round(n, roundStepFor(EX_BY_ID[pe.exId], prof, n)), 0, 999); }
         showBuilderSheet(prof); return;
       }
       if (raw !== '') {

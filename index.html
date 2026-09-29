@@ -3970,6 +3970,15 @@ function applyProgression(profile, log, opts) {
       msgs.push({ exId: ex.id, kind: 'up', text: `${ex.name}: go for ${st.repTarget} reps next time.` });
       continue;
     }
+    /* Every set at 0 on a loaded lift means no weight was written down — not that
+       she earned more. Counting it as a success took Izzy's hip thrust from the
+       5kg she last logged to 15 across one unweighted session. Hold instead. */
+    if (topW === 0 && st.w != null && st.w > 0) {
+      delete st.anchored;
+      st.why = { k: 'noload', to: st.w };
+      msgs.push({ exId: ex.id, kind: 'hold', text: `${ex.name}: no weight logged — staying at ${st.w}kg.` });
+      continue;
+    }
     if (st.w == null) { st.w = workW || topW; }
 
     /* She trained at a different weight from the one we put in front of her.
@@ -6253,6 +6262,160 @@ function buildProgressDoc(prof) { // athlete → coach: last 90 days + current s
   };
 }
 
+/* ---- coming back: restoring an athlete's history from the pair ------------
+   A phone that loses its storage — iOS evicting a site, a deleted home-screen
+   icon, a reinstall — comes back empty. Izzy hit exactly this in September 2026.
+   The relay still holds the last 90 days of her training, and the server now
+   refuses to let an empty phone overwrite it (migration lo_push_progress_never_
+   forget). This pulls that copy back and MERGES it in — never replaces — so
+   anything logged on the phone in the meantime is kept too.
+
+   Order matters: who she is, then the coach's current plan, then her sessions
+   replayed through the real engine AGAINST that plan. The synced history strips
+   each session's rep range, and the engine needs it to rebuild her weights. */
+const _logKey = l => `${l.date}|${l.dayName || ''}|${(l.entries || []).length}`;
+
+/* sessions the server holds that this phone doesn't */
+function missingFromPhone(prof, pg) {
+  const have = new Set((prof.logs || []).map(_logKey));
+  return ((pg && pg.logs) || []).filter(l => l && l.date && Array.isArray(l.entries) && !have.has(_logKey(l)));
+}
+
+function restoreFromPair(prof, full) {
+  const pg = (full && full.progress) || {};
+  const fresh = !(prof.logs || []).length;          // nothing of her own yet → take back her settings too
+  const out = { added: 0, prs: 0, fresh, plan: false };
+
+  // 1. who she is — only when the phone has nothing of its own to protect
+  if (fresh) {
+    if (pg.name) prof.name = String(pg.name).slice(0, 18);
+    if (pg.emoji) prof.emoji = pg.emoji;
+    if (pg.units === 'kg' || pg.units === 'lb') prof.units = pg.units;
+    if (pg.distUnit) prof.distUnit = pg.distUnit;
+    if (pg.swimUnit) prof.swimUnit = pg.swimUnit;
+    if (pg.quiz && typeof pg.quiz === 'object') {
+      const q = {};
+      for (const [k, v] of Object.entries(pg.quiz)) if (v != null) q[k] = v;
+      prof.quiz = Object.assign({}, prof.quiz, q);
+    }
+    if (!prof.quiz.goal || !GOALS[prof.quiz.goal]) prof.quiz.goal = 'muscle';
+    if (!prof.quiz.experience || !EXPERIENCE[prof.quiz.experience]) prof.quiz.experience = 'intermediate';
+    if (pg.program) prof.program = pg.program;
+    if (pg.totals && pg.totals.since) prof.createdAt = pg.totals.since;
+  }
+
+  // 2. the coach's current plan — she is re-joining, not being offered something new
+  if (full && full.plan && applyPlanDoc(prof, full.plan, full.planRev)) {
+    out.plan = true;
+    if (prof.coachSync) prof.coachSync.appliedPlanRev = full.planRev;
+    prof.pendingCoachPlan = null;
+  }
+
+  // 3. her sessions — a union, keyed on date + name + shape
+  prof.logs = prof.logs || [];
+  for (const l of missingFromPhone(prof, pg)) {
+    prof.logs.push({
+      id: U.uid(), date: l.date, dayName: l.dayName || 'Workout', dayIdx: null,
+      durationMin: +l.durationMin || 0, react: l.react || null, note: l.note || null, restored: true,
+      entries: l.entries.filter(e => e && EX_BY_ID[e.exId]).map(e => ({
+        exId: e.exId, plan: planExFor(prof, e.exId), feel: e.feel || null,
+        targetW: e.targetW != null ? +e.targetW : null, coachSet: !!e.coachSet,
+        sets: (e.sets || []).map(st => ({ w: +st.w || 0, reps: +st.reps || 0, done: true })),
+      })),
+    });
+    out.added++;
+  }
+  prof.logs.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+  // bests: whichever is better, per lift
+  prof.prs = prof.prs || {};
+  for (const [id, p] of Object.entries(pg.prs || {})) {
+    if (!p || !EX_BY_ID[id]) continue;
+    const cur = prof.prs[id];
+    if (!cur || (+p.w || 0) > (+cur.w || 0) || ((+p.w || 0) === (+cur.w || 0) && (+p.e1rm || 0) > (+cur.e1rm || 0))) {
+      prof.prs[id] = Object.assign({}, p); out.prs++;
+    }
+  }
+  // bodyweight, cardio, badges, notes, her day moves — all unions
+  const bk = b => b.date + '|' + b.w;
+  const bodyHave = new Set((prof.bodyLogs || []).map(bk));
+  prof.bodyLogs = (prof.bodyLogs || []).concat((pg.bodyLogs || []).filter(b => b && b.date && b.w > 0 && !bodyHave.has(bk(b))))
+    .sort((a, b) => a.date < b.date ? -1 : 1);
+  const sk = x => [x.date, x.act, x.durMin, x.dist].join('|');
+  prof.sportLogs = prof.sportLogs || [];
+  const sportHave = new Set(prof.sportLogs.map(sk));
+  for (const raw of (pg.sportLogs || [])) {
+    const x = sanitizeCardioLog(raw);
+    if (!x || !x.date || sportHave.has(sk(x))) continue;
+    prof.sportLogs.push(x); sportHave.add(sk(x));
+  }
+  prof.sportLogs.sort((a, b) => a.date < b.date ? -1 : 1);
+  prof.badges = Object.assign({}, pg.badges || {}, prof.badges || {});
+  if (Array.isArray(pg.thread)) { try { mergeThread(prof, pg.thread); } catch (e) { /* notes are a nicety */ } }
+  if (pg.dayMoves) { try { mergeDayMoves(prof, pg.dayMoves); } catch (e) { /* ditto */ } }
+
+  // 4. the engine's memory, rebuilt by running her sessions back through it.
+  // Each session is replayed as if the engine had shown her its CURRENT opinion,
+  // so wherever that drifts from what she really lifted, it re-anchors to her.
+  // Replayed naively it drifted: 7kg on her last press came back as 10kg, because
+  // today's engine climbs differently from the one that wrote her history. The
+  // stored logs keep their real targetW — the coach's record is not rewritten.
+  // Her plate steps first: the replay climbs in them. Learned after the replay, a
+  // cable row she'd moved in half-kilos came back at 30 from 25 on a 5kg default.
+  // Only the LEARNED steps reset — anything she has set herself stays.
+  stepStore(prof).learn = {};
+  for (const id of new Set(prof.logs.flatMap(l => (l.entries || []).map(e => e.exId)))) relearnStep(prof, id);
+  prof.exState = {};
+  for (const l of prof.logs) {
+    const shown = { ...l, entries: (l.entries || []).map(e => {
+      const st = prof.exState[e.exId];
+      return (st && st.w != null) ? { ...e, targetW: st.w } : e;
+    }) };
+    try { applyProgression(prof, shown); } catch (e) { /* one odd session can't stop the rest */ }
+  }
+  // the replay's own re-anchors are bookkeeping, not something she just did
+  for (const st of Object.values(prof.exState)) delete st.anchored;
+  // her dumbbell weights are already whatever she settled on — never re-ask, or a
+  // second "both combined" would halve them twice
+  if (!prof.dbConv && dbPairSetCount(prof)) prof.dbConv = 'skip';
+  return out;
+}
+
+/* One path for every way of pairing as an athlete: validate the code, and if the
+   relay holds sessions this phone has lost, bring them back before anything is
+   sent up. Resolves to { ok, restored, coach } or { ok:false, why }. */
+async function pairAsAthlete(prof, key) {
+  const full = await syncRpc('lo_pull', { p_key: key });
+  if (!full) return { ok: false, why: 'unknown' };
+  prof.coachSync = { key, coachName: full.coach || 'Your coach', appliedPlanRev: 0, pendingProgress: false };
+  let restored = null;
+  if (missingFromPhone(prof, full.progress).length) restored = restoreFromPair(prof, full);
+  // now it is safe to send: the phone holds everything the server did, and more
+  prof.coachSync.pendingProgress = true;
+  saveApp();
+  return { ok: true, restored, coach: full.coach || 'your coach' };
+}
+
+/* iPhone Safari and a home-screen web app keep SEPARATE storage: a link tapped in
+   Messages opens an empty Safari copy, which looks exactly like being logged out. */
+function iosBrowserTab() {
+  try {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+    return ios && !standalone;
+  } catch (e) { return false; }
+}
+
+/* Ask the browser not to evict this origin's storage. Losing it is exactly how an
+   athlete ends up locked out; an installed web app is usually granted this. */
+function askPersistentStorage() {
+  try {
+    if (navigator.storage && navigator.storage.persist && navigator.storage.persisted) {
+      navigator.storage.persisted().then(p => { if (!p) return navigator.storage.persist(); }).catch(() => {});
+    }
+  } catch (e) { /* not supported here */ }
+}
+
 /* ---------- sync engine (runs over every profile, not just the active one) ---------- */
 async function athleteSyncTick(prof, force) {
   const cs = prof.coachSync; if (!cs) return false;
@@ -6520,7 +6683,7 @@ const Charts = (() => {
 /* ============ LiftOff — app state & persistence ============ */
 'use strict';
 
-const APP_VERSION = '3.37.0';
+const APP_VERSION = '3.38.0';
 
 const App = {
   data: null,          // { version, activeProfileId, profiles: {} }
@@ -6555,6 +6718,7 @@ function loadApp() {
   App.justUpdated = !!(prevVer && updating);
   if (App.data.appVersion !== APP_VERSION) { App.data.appVersion = APP_VERSION; saveApp(); }
   if (App.storeRestored) saveApp(); // heal the main key immediately from the recovered state
+  askPersistentStorage();            // v3.38 — so the browser doesn't quietly evict her training again
   const p = activeProfile();
   // restore an in-flight workout — but a PAUSED one stays paused (Today shows the resume card)
   if (p && p.activeWorkout && !p.activeWorkout.pausedAt) App.workout = p.activeWorkout;
@@ -6754,6 +6918,7 @@ function whyFor(prof, pe, t, ctx) {
   if (y.k === 'miss') return 'Same weight again — the reps slipped last time';
   if (y.k === 'hardhold') return 'Same weight — you rated it hard, so it holds until it feels easier';
   if (y.k === 'finish') return `Same weight — finish all ${y.sets || pe.sets} sets in range and it goes up`;
+  if (y.k === 'noload') return 'Same weight — no weight was logged last time';
   if (y.k === 'coachhold') return `${U.esc(coachName)} is holding this weight — chase the reps instead`;
   if (y.k === 'pushup') return y.from ? `Up from ${w(y.from)} — ${U.esc(coachName)} wants this one pushed` : `Pushed up — ${U.esc(coachName)}'s call`;
   if (y.k === 'floor') return 'Same weight — the reps are the thing to chase from here';
@@ -7097,7 +7262,8 @@ function renderOnboarding() {
         <div class="row mt12"><span style="font-size:20px"></span><div><b style="font-size:14px">Auto progression</b><div class="muted">Weights adjust to how you actually lift</div></div></div>
         <div class="row mt12"><span style="font-size:20px"></span><div><b style="font-size:14px">Every move demonstrated</b><div class="muted">Animations & form tips built in — no links</div></div></div>
       </div>
-      <div class="ob-nav"><button class="btn primary block" data-a="ob-next">Get started →</button></div>
+      <div class="ob-nav" style="flex-direction:column"><button class="btn primary block" data-a="ob-next">Get started →</button>
+        <button class="btn ghost block" data-a="ob-return-open">Coming back? I have a coach code</button></div>
     </div>`;
   }
   if (step === 'name') body = `
@@ -7194,6 +7360,43 @@ function renderWeekBuilder(sched, athleteType, sportLabel, action, title, hint) 
 
 function obAction(a, el) {
   const ob = obState();
+  if (a === 'ob-return-open') {
+    showSheet(`<h3 style="font-size:19px;font-weight:900">Welcome back</h3>
+      <p class="muted mt8" style="margin-bottom:10px">Enter the code your coach sent you. Your training comes back with it.</p>
+      ${iosBrowserTab() ? `<div class="card mt8" style="padding:10px 12px;font-size:13px;margin-bottom:10px"><b>On iPhone?</b> Do this in the LiftOff app on your home screen, not in Safari — they keep separate copies, so it would only come back here.</div>` : ''}
+      <input class="ob-input" id="ob-return-key" placeholder="LIFT-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" autocapitalize="characters" style="font-family:ui-monospace,monospace;letter-spacing:1px">
+      <button class="btn primary block mt16" data-a="ob-return">Bring my training back</button>`);
+    return;
+  }
+  if (a === 'ob-return') {
+    const key = normalizePairKey((document.getElementById('ob-return-key') || {}).value || '');
+    if (!key) { toast('That code doesn’t look complete — check it and try again'); return; }
+    if (navigator.onLine === false) { toast('Need internet for this — try again when online'); return; }
+    el.disabled = true; el.textContent = 'Finding your training…';
+    const ob = obState();
+    // a placeholder profile: everything in it is replaced from the pair a moment later
+    const prof = createProfile({ name: 'Athlete', emoji: ob.emoji, goal: 'muscle', experience: 'intermediate',
+      daysPerWeek: 3, sessionMinutes: ob.sessionMinutes, equipment: ob.equipment, focus: [], bodySex: ob.bodySex });
+    pairAsAthlete(prof, key).then(r => {
+      if (!r.ok) {
+        // wrong code — leave no trace of the placeholder
+        delete App.data.profiles[prof.id]; App.data.activeProfileId = null; saveApp();
+        el.disabled = false; el.textContent = 'Bring my training back';
+        toast('Code not recognised — double-check with your coach');
+        return;
+      }
+      App.onboarding = null; closeSheet(); App.view = 'today'; render();
+      toast(r.restored && r.restored.added
+        ? `Welcome back, ${prof.name} — ${r.restored.added} ${U.plural(r.restored.added, 'session')} restored`
+        : `Paired with ${r.coach}`);
+      syncTick(true);
+    }).catch(() => {
+      delete App.data.profiles[prof.id]; App.data.activeProfileId = null; saveApp();
+      el.disabled = false; el.textContent = 'Bring my training back';
+      toast('Couldn’t reach the sync service — check your connection');
+    });
+    return;
+  }
   if (a === 'ob-next') {
     const step = OB_STEPS[ob.step];
     if (step === 'athlete' && !ob.athleteType) return toast('Pick what fits you best');
@@ -12701,11 +12904,12 @@ function coachAction(a, el, prof) {
     if (!key) { toast('That code doesn’t look complete — check it and try again'); return true; }
     if (navigator.onLine === false) { toast('Need internet to pair — try again when online'); return true; }
     const btn = el; btn.disabled = true; btn.textContent = 'Checking…';
-    syncRpc('lo_revs', { p_key: key }).then(revs => {
-      if (!revs) { btn.disabled = false; btn.textContent = 'Pair up'; toast('Code not recognised — double-check with your coach'); return; }
-      prof.coachSync = { key, coachName: revs.coach || 'Your coach', appliedPlanRev: 0, pendingProgress: true };
-      saveApp(); closeSheet(); render();
-      toast(`Paired with ${revs.coach || 'your coach'}`);
+    pairAsAthlete(prof, key).then(r => {
+      if (!r.ok) { btn.disabled = false; btn.textContent = 'Pair up'; toast('Code not recognised — double-check with your coach'); return; }
+      closeSheet(); render();
+      toast(r.restored && r.restored.added
+        ? `Welcome back — ${r.restored.added} ${U.plural(r.restored.added, 'session')} restored`
+        : `Paired with ${r.coach}`);
       syncTick(true);
     }).catch(() => { btn.disabled = false; btn.textContent = 'Pair up'; toast('Couldn’t reach the sync service — check your connection'); });
     return true;
